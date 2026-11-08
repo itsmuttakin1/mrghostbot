@@ -41,6 +41,16 @@ IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "").strip()
 
 START_PHOTO_PATH = "start_photo.jpg"
 
+# Auto-load YouTube Cookies from environment variable (for Railway / Cloud Hosting)
+env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
+if env_cookies and (not os.path.exists("cookies.txt") or os.path.getsize("cookies.txt") == 0):
+    try:
+        with open("cookies.txt", "w", encoding="utf-8") as cf:
+            cf.write(env_cookies)
+        print("[*] Successfully loaded cookies from YOUTUBE_COOKIES environment variable!", flush=True)
+    except Exception as e:
+        print(f"[!] Error writing env cookies: {e}", flush=True)
+
 if not BOT_TOKEN:
     print("❌ CRITICAL ERROR: BOT_TOKEN is missing in Environment Variables!", flush=True)
 
@@ -205,6 +215,7 @@ def get_ydl_options(output_path):
         'quiet': True,
         'no_warnings': True,
         'no_check_certificates': True,
+        'source_address': '0.0.0.0',
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
@@ -217,6 +228,9 @@ def get_ydl_options(output_path):
     }
     if FFMPEG_DIR:
         opts['ffmpeg_location'] = FFMPEG_DIR
+    proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    if proxy:
+        opts['proxy'] = proxy
     if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
         opts['cookiefile'] = "cookies.txt"
     return opts
@@ -1203,6 +1217,7 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                     'quiet': True,
                     'no_warnings': True,
                     'no_check_certificates': True,
+                    'source_address': '0.0.0.0',
                     'extractor_args': {
                         'youtube': {
                             'player_client': ['android']
@@ -1211,6 +1226,9 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                 }
                 if FFMPEG_DIR:
                     retry_opts['ffmpeg_location'] = FFMPEG_DIR
+                proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+                if proxy:
+                    retry_opts['proxy'] = proxy
                 if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
                     retry_opts['cookiefile'] = "cookies.txt"
                 with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
@@ -1232,6 +1250,7 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                     'quiet': True,
                     'no_warnings': True,
                     'no_check_certificates': True,
+                    'source_address': '0.0.0.0',
                     'extractor_args': {
                         'youtube': {
                             'player_client': ['tv_embedded']
@@ -1240,6 +1259,9 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                 }
                 if FFMPEG_DIR:
                     tv_opts['ffmpeg_location'] = FFMPEG_DIR
+                proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+                if proxy:
+                    tv_opts['proxy'] = proxy
                 with yt_dlp.YoutubeDL(tv_opts) as ydl_tv:
                     info3 = ydl_tv.extract_info(target_url, download=True)
                     if info3:

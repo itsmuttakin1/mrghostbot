@@ -1,9 +1,13 @@
 FROM python:3.11-slim
 
-# Install system dependencies (ffmpeg is essential for yt-dlp)
+# Install system dependencies:
+# ffmpeg: audio/video merging and conversion
+# curl: healthchecks and fetching
+# nodejs: solves YouTube BotGuard PO (Proof of Origin) tokens on servers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -14,9 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all project files
 COPY . .
-
-# Expose default web server port
-EXPOSE 10000
 
 # Start bot and web server
 CMD ["python", "bot.py"]
