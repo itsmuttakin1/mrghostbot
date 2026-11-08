@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import io
 import glob
 import time
 import html
@@ -22,6 +23,10 @@ import yt_dlp
 import requests
 import phonenumbers
 from phonenumbers import geocoder, carrier, timezone
+from dotenv import load_dotenv
+from PIL import Image
+
+load_dotenv()
 
 # ==========================================
 # 1. FLASK WEB SERVER & CONFIGURATION
@@ -33,9 +38,23 @@ ADMIN_IDS = [5140546628, 7728010216, 8967715315]
 PRIMARY_ADMIN = 5140546628
 REQUIRED_CHANNEL = "@mrghost_121"
 CHANNEL_URL = "https://t.me/mrghost_121"
+REQUIRED_CHANNEL_2_URL = "https://t.me/+RlwOoen4k05kMDg9"
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "").strip()
 
 START_PHOTO_PATH = "start_photo.jpg"
+APK_BANNER_PATH = "apk_banner.jpg"
+APK_API_URL = "https://app-creator-x.ueu.workers.dev/api/v1/build"
+
+MAX_HTML_SIZE = 10 * 1024 * 1024
+MAX_ZIP_SIZE = 10 * 1024 * 1024
+MAX_ICON_SIZE = 6 * 1024 * 1024
+MAX_ICON_PIXELS = 4_000_000
+MAX_TOTAL_BODY = 16_842_752
+MAX_TOTAL_FILES = MAX_TOTAL_BODY - 64 * 1024
+MAX_APP_NAME_UTF16 = 80
+MAX_APP_NAME_UTF8 = 120
+
+APK_SESSIONS = {}
 
 if not BOT_TOKEN:
     print("❌ CRITICAL ERROR: BOT_TOKEN is missing in Environment Variables!", flush=True)
@@ -279,9 +298,18 @@ def init_db():
                 first_name TEXT,
                 is_banned INTEGER DEFAULT 0,
                 total_uploads INTEGER DEFAULT 0,
+                coins INTEGER DEFAULT 0,
+                last_daily_bonus TEXT DEFAULT NULL,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("PRAGMA table_info(users)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "coins" not in cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN coins INTEGER DEFAULT 0")
+        if "last_daily_bonus" not in cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_daily_bonus TEXT DEFAULT NULL")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS files (
                 file_code TEXT PRIMARY KEY,
@@ -307,8 +335,135 @@ def init_db():
         """)
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_mode', '0')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('start_photo_protection', '1')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_bonus_amount', '5')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('card_cost', '5')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('required_channel_2_id', '')")
         conn.commit()
         conn.close()
+
+def get_setting(key, default=""):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else default
+
+def set_setting(key, value):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+        conn.close()
+
+def get_user_coins(user_id):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, coins) VALUES (?, 'N/A', 'User', 0)", (user_id,))
+        conn.commit()
+        cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else 0
+
+def add_user_coins(user_id, amount):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, coins) VALUES (?, 'N/A', 'User', 0)", (user_id,))
+        cursor.execute("UPDATE users SET coins = COALESCE(coins, 0) + ? WHERE user_id = ?", (amount, user_id))
+        conn.commit()
+        cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else 0
+
+def deduct_user_coins(user_id, amount):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, coins) VALUES (?, 'N/A', 'User', 0)", (user_id,))
+        cursor.execute("UPDATE users SET coins = MAX(0, COALESCE(coins, 0) - ?) WHERE user_id = ?", (amount, user_id))
+        conn.commit()
+        cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else 0
+
+def set_user_coins(user_id, amount):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, coins) VALUES (?, 'N/A', 'User', 0)", (user_id,))
+        cursor.execute("UPDATE users SET coins = ? WHERE user_id = ?", (max(0, amount), user_id))
+        conn.commit()
+        conn.close()
+
+def get_daily_bonus_amount():
+    val = get_setting("daily_bonus_amount", "5")
+    try:
+        return int(val)
+    except Exception:
+        return 5
+
+def set_daily_bonus_amount(amount: int):
+    set_setting("daily_bonus_amount", str(max(1, amount)))
+
+def get_card_cost():
+    val = get_setting("card_cost", "5")
+    try:
+        return int(val)
+    except Exception:
+        return 5
+
+def can_claim_daily_bonus(user_id):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT last_daily_bonus FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+    if not row or not row[0]:
+        return True, 0, 0
+
+    try:
+        last_time = datetime.fromisoformat(row[0])
+        diff = datetime.now() - last_time
+        seconds_left = 86400 - int(diff.total_seconds())
+        if seconds_left <= 0:
+            return True, 0, 0
+        else:
+            hours = seconds_left // 3600
+            minutes = (seconds_left % 3600) // 60
+            return False, hours, minutes
+    except Exception:
+        return True, 0, 0
+
+def claim_daily_bonus(user_id):
+    can_claim, hours, mins = can_claim_daily_bonus(user_id)
+    if not can_claim:
+        return False, hours, mins, get_user_coins(user_id)
+
+    bonus_pts = get_daily_bonus_amount()
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, coins) VALUES (?, 'N/A', 'User', 0)", (user_id,))
+        now_str = datetime.now().isoformat()
+        cursor.execute(
+            "UPDATE users SET coins = COALESCE(coins, 0) + ?, last_daily_bonus = ? WHERE user_id = ?",
+            (bonus_pts, now_str, user_id)
+        )
+        conn.commit()
+        cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        new_balance = row[0] if row else bonus_pts
+        conn.close()
+    return True, bonus_pts, 0, new_balance
 
 def register_user(user):
     with db_mutex:
@@ -491,29 +646,44 @@ def clear_cards_db():
 def check_channel_joined(user_id):
     if user_id in ADMIN_IDS:
         return True
+
+    # 1. Verify Channel 1 (@mrghost_121)
     try:
-        member = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        if member.status in ["member", "administrator", "creator"]:
-            return True
-        return False
+        member1 = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+        if member1.status not in ["member", "administrator", "creator"]:
+            return False
     except Exception as e:
-        print(f"[!] Channel verify warning: {e}", flush=True)
-        return True
+        print(f"[!] Channel 1 verify warning: {e}", flush=True)
+
+    # 2. Verify Channel 2 (VIP Channel)
+    ch2_id = get_setting("required_channel_2_id") or os.getenv("REQUIRED_CHANNEL_2_ID", "").strip()
+    if ch2_id:
+        try:
+            target_id = int(ch2_id) if (ch2_id.startswith("-") or ch2_id.isdigit()) else ch2_id
+            member2 = bot.get_chat_member(target_id, user_id)
+            if member2.status not in ["member", "administrator", "creator"]:
+                return False
+        except Exception as e:
+            print(f"[!] Channel 2 verify warning: {e}", flush=True)
+
+    return True
 
 def send_join_prompt(chat_id, callback_action="verify_home"):
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
-        types.InlineKeyboardButton("📢 Join Official Channel (@mrghost_121)", url=CHANNEL_URL),
-        types.InlineKeyboardButton("✅ Joined / Verify Now", callback_data=callback_action)
+        types.InlineKeyboardButton("📢 ১. Join Main Channel (@mrghost_121)", url=CHANNEL_URL),
+        types.InlineKeyboardButton("📢 ২. Join VIP Channel 2", url=REQUIRED_CHANNEL_2_URL),
+        types.InlineKeyboardButton("✅ Joined Both / Verify Now", callback_data=callback_action)
     )
     text = (
-        "⛔ <b>Access Denied!</b>\n\n"
-        "❌ বটের সকল টুলস ও ফাইল সম্পূর্ণ ফ্রিতে ব্যবহার করতে আগে আমাদের অফিসিয়াল চ্যানেলে জয়েন করতে হবে।\n"
-        "❌ You must join our channel first!\n\n"
-        f"👉 <b>Join:</b> {REQUIRED_CHANNEL}\n"
-        "জয়েন করার পর নিচের <b>Joined / Verify Now</b> বাটনে ক্লিক করুন।"
+        "⛔ <b>Access Denied! | প্রবেশাধিকার সংরক্ষিত</b>\n"
+        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+        "❌ বটের যেকোনো টুলস ও ফিচার ব্যবহার করতে হলে আপনাকে <b>উভয় চ্যানেলে</b> অবশ্যই জয়েন থাকতে হবে:\n\n"
+        f"👉 <b>চ্যানেল ১:</b> {REQUIRED_CHANNEL}\n"
+        f"👉 <b>চ্যানেল ২:</b> <a href='{REQUIRED_CHANNEL_2_URL}'>VIP Private Channel</a>\n\n"
+        "উভয় চ্যানেলে জয়েন করার পর নিচের <b>✅ Joined Both / Verify Now</b> বাটনে ক্লিক করুন।"
     )
-    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
 
 def verify_user_access(message, action_tag="verify_home"):
     user = message.from_user
@@ -568,7 +738,11 @@ def get_main_reply_keyboard(user_id=None):
     markup.row(
         types.KeyboardButton("📂 File Sharing Bot", style="success")
     )
-    # Row 2: YouTube (Red / Danger) | Facebook (Blue / Primary)
+    # Row 2: Website to APK (Blue / Primary)
+    markup.row(
+        types.KeyboardButton("📱 Website to APK", style="primary")
+    )
+    # Row 3: YouTube (Red / Danger) | Facebook (Blue / Primary)
     markup.row(
         types.KeyboardButton("🎥 YouTube Downloader", style="danger"),
         types.KeyboardButton("📹 Facebook Download", style="primary")
@@ -635,10 +809,15 @@ def get_file_sharing_keyboard():
     return markup
 
 def get_visa_menu_keyboard():
+    cost = get_card_cost()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton("💳 CC Generator", style="primary"),
-        types.KeyboardButton("💳 Get Free Card", style="success")
+        types.KeyboardButton(f"💳 Get Card ({cost} Coins)", style="success"),
+        types.KeyboardButton("💳 CC Generator", style="primary")
+    )
+    markup.row(
+        types.KeyboardButton("🎁 Daily Bonus", style="primary"),
+        types.KeyboardButton("💰 My Balance", style="success")
     )
     markup.row(types.KeyboardButton("🏠 Home", style="danger"))
     return markup
@@ -657,6 +836,10 @@ def get_admin_keyboard():
         types.KeyboardButton("👥 Total Users", style="success")
     )
     markup.row(
+        types.KeyboardButton("💰 User Coin (+/-)", style="success"),
+        types.KeyboardButton("🎁 Set Daily Bonus", style="primary")
+    )
+    markup.row(
         types.KeyboardButton("➕ Add Bulk Cards", style="primary"),
         types.KeyboardButton("💳 Card Stock", style="success")
     )
@@ -670,10 +853,13 @@ def get_admin_keyboard():
     )
     markup.row(
         types.KeyboardButton("☠️ Ban List", style="danger"),
-        types.KeyboardButton(maint_btn, style="danger" if maint else "success")
+        types.KeyboardButton("📢 Channel 2 ID", style="primary")
     )
     markup.row(
         types.KeyboardButton(protect_btn, style="success" if protect else "danger"),
+        types.KeyboardButton(maint_btn, style="danger" if maint else "success")
+    )
+    markup.row(
         types.KeyboardButton("🏠 Home", style="primary")
     )
     return markup
@@ -1249,6 +1435,234 @@ def upload_image_to_imgbb(file_bytes):
 
 
 # ==========================================
+# APK BUILDER (WEBSITE TO APK) HELPERS
+# ==========================================
+def validate_app_name(value):
+    value = (value or "").strip()
+    if not value:
+        return "দয়া করে একটি সঠিক অ্যাপ নাম লিখুন।"
+    utf16_units = len(value.encode("utf-16-le")) // 2
+    utf8_bytes = len(value.encode("utf-8"))
+    if utf16_units > MAX_APP_NAME_UTF16:
+        return f"অ্যাপ নাম অনেক বড় ({utf16_units}/80 UTF-16 units)।"
+    if utf8_bytes > MAX_APP_NAME_UTF8:
+        return f"অ্যাপ নাম সাইজে বড় ({utf8_bytes}/120 UTF-8 bytes)।"
+    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value):
+        return "অ্যাপ নামে কোনো ইনভ্যালিড কন্ট্রোল ক্যারেক্টার থাকতে পারবে না।"
+    return None
+
+def validate_icon(content):
+    if not content:
+        return "আইকন ফাইলটি খালি।"
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            if image.format not in ("PNG", "JPEG"):
+                return "শুধুমাত্র PNG এবং JPEG ফরম্যাটের আইকন গ্রহণযোগ্য।"
+            width, height = image.size
+            if width * height > MAX_ICON_PIXELS:
+                return "আইকন ছবির সাইজ অনেক বড় (সর্বোচ্চ 4 Megapixels অনুমোদিত)।"
+            if image.format == "PNG" and image.info.get("interlace"):
+                return "Interlaced PNG আইকন কাজ করবে না। সাধারণ Standard PNG ছবি দিন।"
+    except Exception:
+        return "ফাইলটি কোনো বৈধ PNG বা JPEG ছবি নয়।"
+    return None
+
+def send_apk_home(chat_id, user_id=None):
+    if user_id:
+        clear_state(user_id)
+        APK_SESSIONS.pop(user_id, None)
+
+    caption = (
+        "📱 <b>𝐀𝐏𝐊 𝐂𝐎𝐍𝐕𝐄𝐑𝐓𝐄𝐑 𝐒𝐓𝐔𝐃𝐈𝐎 — 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓</b>\n"
+        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+        "🌐 <b>Website to Android APK</b>\n\n"
+        "আপনার যেকোনো HTML ওয়েবসাইট বা ZIP প্রজেক্টকে সরাসরি অ্যান্ড্রয়েড অ্যাপ্লিকেশনে (APK) রূপান্তর করুন।\n\n"
+        "⚡ <i>Fast • Secure • Real Android APK</i>\n"
+        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🚀 Create APK", callback_data="apk:new"),
+        types.InlineKeyboardButton("📘 How it works", callback_data="apk:help")
+    )
+
+    if os.path.exists(APK_BANNER_PATH):
+        try:
+            with open(APK_BANNER_PATH, "rb") as photo:
+                bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML", reply_markup=markup)
+                return
+        except Exception as e:
+            print(f"[!] Error sending APK banner: {e}", flush=True)
+
+    bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
+
+def send_apk_confirmation(chat_id, user_id):
+    session = APK_SESSIONS.get(user_id)
+    if not session or "html" not in session or "icon" not in session:
+        bot.send_message(chat_id, "❌ সেশন পাওয়া যায়নি। অনুগ্রহ করে আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user_id))
+        return
+    app_name = session.get("app_name", "My App")
+    html_name, html_bytes = session["html"]
+    icon_name, icon_bytes = session["icon"]
+
+    summary_text = (
+        "<b>Step 4/5 — Review & Confirmation</b>\n"
+        "✅  ✅  ✅  🔵  ⚪\n\n"
+        "📋 <b>সবকিছু প্রস্তুত! কনফার্মেশন দিন:</b>\n"
+        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n"
+        f"📛 <b>App Name:</b> <b>{html.escape(app_name)}</b>\n"
+        f"📄 <b>Website:</b> <code>{html.escape(html_name)}</code> ({round(len(html_bytes)/1024, 1)} KB)\n"
+        f"🖼️ <b>Icon:</b> <code>{html.escape(icon_name)}</code> ({round(len(icon_bytes)/1024, 1)} KB)\n"
+        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+        "সব তথ্য সঠিক থাকলে <b>Build APK</b> বাটনে চাপুন:"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ Build APK", callback_data="apk:build"),
+        types.InlineKeyboardButton("✏️ Rename", callback_data="apk:rename")
+    )
+    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+    bot.send_message(chat_id, summary_text, parse_mode="HTML", reply_markup=markup)
+
+def animate_apk_build(chat_id, message_id, stop_event):
+    frames = ["◐", "◓", "◑", "◒"]
+    stages = [
+        ("Uploading website files", "📤", 25),
+        ("Preparing Android WebView", "🧩", 50),
+        ("Compiling Android package", "⚙️", 75),
+        ("Finalizing & Packing APK", "🔐", 95),
+    ]
+    index = 0
+    while not stop_event.is_set():
+        label, icon, percent = stages[index % len(stages)]
+        filled = max(1, percent // 10)
+        bar = "🟦" * filled + "▫️" * (10 - filled)
+        text = (
+            f"<b>{frames[index % len(frames)]} 𝐀𝐏𝐊 𝐁𝐔𝐈𝐋𝐃 𝐈𝐍 𝐏𝐑𝐎𝐆𝐑𝐄𝐒𝐒</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+            f"{icon} <b>{label}...</b>\n"
+            f"{bar} <b>{percent}%</b>\n\n"
+            "☕ অনুগ্রহ করে ১–২ মিনিট অপেক্ষা করুন...\n"
+            "<i>আপনার ফাইলগুলো নিরাপদে প্রসেস হচ্ছে।</i>"
+        )
+        try:
+            bot.edit_message_text(text, chat_id, message_id, parse_mode="HTML")
+        except Exception:
+            pass
+        index += 1
+        stop_event.wait(2.0)
+
+def build_apk_task(chat_id, user_id, status_message_id=None):
+    session = APK_SESSIONS.get(user_id)
+    if not session or "html" not in session or "icon" not in session:
+        bot.send_message(chat_id, "❌ সেশনের মেয়াদ শেষ হয়েছে। দয়া করে আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user_id))
+        return
+
+    stop_event = threading.Event()
+    anim_thread = None
+    if status_message_id:
+        anim_thread = threading.Thread(target=animate_apk_build, args=(chat_id, status_message_id, stop_event), daemon=True)
+        anim_thread.start()
+    else:
+        try:
+            m = bot.send_message(chat_id, "⚙️ <b>Preparing your APK build...</b>", parse_mode="HTML")
+            status_message_id = m.message_id
+            anim_thread = threading.Thread(target=animate_apk_build, args=(chat_id, status_message_id, stop_event), daemon=True)
+            anim_thread.start()
+        except Exception:
+            pass
+
+    app_name = session["app_name"]
+    html_name, html_bytes = session["html"]
+    icon_name, icon_bytes = session["icon"]
+
+    html_mime = "application/zip" if html_name.lower().endswith(".zip") else "text/html"
+    icon_mime = "image/png" if icon_name.lower().endswith("png") else "image/jpeg"
+    files = {
+        "html": (html_name, html_bytes, html_mime),
+        "icon": (icon_name, icon_bytes, icon_mime)
+    }
+
+    try:
+        resp = requests.post(
+            APK_API_URL,
+            data={"app_name": app_name},
+            files=files,
+            timeout=150
+        )
+        stop_event.set()
+        if anim_thread:
+            anim_thread.join(timeout=2.0)
+
+        content_type = resp.headers.get("Content-Type", "")
+        if resp.status_code == 200 and "application/vnd.android.package-archive" in content_type:
+            if status_message_id:
+                try:
+                    bot.edit_message_text("✅ <b>APK তৈরি সম্পন্ন হয়েছে!</b>\n📦 ফাইল আপনার চ্যাটে পাঠানো হচ্ছে...", chat_id, status_message_id, parse_mode="HTML")
+                except Exception:
+                    pass
+
+            disposition = resp.headers.get("Content-Disposition", "")
+            match = re.search(r'filename=(?:"([^"]+)"|([^;]+))', disposition)
+            apk_name = (match.group(1) or match.group(2)).strip() if match else f"{app_name}.apk"
+            if not apk_name.lower().endswith(".apk"):
+                apk_name += ".apk"
+
+            clean_caption = (
+                "🎉 <b>𝐀𝐏𝐊 𝐁𝐔𝐈𝐋𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄!</b>\n"
+                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                f"📦 <b>App Name:</b> <code>{html.escape(apk_name)}</code>\n"
+                "⚡ <b>Status:</b> Ready to install\n\n"
+                '👨‍💻 <b>Powered by</b> <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+            )
+            bot.send_document(
+                chat_id,
+                (apk_name, resp.content),
+                caption=clean_caption,
+                parse_mode="HTML",
+                reply_markup=get_main_reply_keyboard(user_id)
+            )
+        else:
+            err_msg = ""
+            try:
+                err_payload = resp.json()
+                err_msg = err_payload.get("error", resp.text)
+            except Exception:
+                err_msg = resp.text or f"HTTP {resp.status_code}"
+
+            fail_txt = (
+                f"❌ <b>APK তৈরি ব্যর্থ হয়েছে!</b> (Status: {resp.status_code})\n"
+                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                f"⚠️ কারণ: <code>{html.escape(str(err_msg)[:300])}</code>\n\n"
+                "দয়া করে ফাইল সাইজ ও কনফিগারেশন চেক করে আবার চেষ্টা করুন।"
+            )
+            if status_message_id:
+                try:
+                    bot.edit_message_text(fail_txt, chat_id, status_message_id, parse_mode="HTML")
+                except Exception:
+                    bot.send_message(chat_id, fail_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
+            else:
+                bot.send_message(chat_id, fail_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
+
+    except Exception as exc:
+        stop_event.set()
+        if anim_thread:
+            anim_thread.join(timeout=2.0)
+        err_txt = f"❌ <b>সার্ভারে সমস্যা হয়েছে:</b>\n<code>{html.escape(str(exc)[:200])}</code>\nঅনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।"
+        if status_message_id:
+            try:
+                bot.edit_message_text(err_txt, chat_id, status_message_id, parse_mode="HTML")
+            except Exception:
+                bot.send_message(chat_id, err_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
+        else:
+            bot.send_message(chat_id, err_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
+    finally:
+        stop_event.set()
+        clear_state(user_id)
+        APK_SESSIONS.pop(user_id, None)
+
+
+# ==========================================
 # 6. BOT HANDLERS (COMMANDS & TOOLS)
 # ==========================================
 if bot:
@@ -1394,16 +1808,27 @@ if bot:
         maint = is_maintenance()
         protect = is_photo_protection_enabled()
         has_cookie = os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0
+        daily_b = get_daily_bonus_amount()
+        c2_id = get_setting("required_channel_2_id") or "Not Configured"
         txt = (
             "⚙️ <b>𝐀𝐃𝐌𝐈𝐍 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 𝐏𝐀𝐍𝐄𝐋</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             f"🔧 <b>Maintenance Mode:</b> {'🟢 ON' if maint else '🔴 OFF'}\n"
             f"🔒 <b>Start Photo Download Protect:</b> {'🟢 ON (Protected)' if protect else '🔴 OFF (Downloadable)'}\n"
+            f"🎁 <b>Daily Bonus Amount:</b> <code>{daily_b} Coins</code>\n"
+            f"📢 <b>VIP Channel 2 ID:</b> <code>{c2_id}</code>\n"
             f"🍪 <b>YouTube Cookies:</b> {'🟢 Active (cookies.txt)' if has_cookie else '🔴 Not Uploaded'}\n"
             f"👥 <b>Total Users:</b> <code>{len(get_all_user_ids())}</code>\n"
             f"💳 <b>Card Stock:</b> <code>{count_cards_db()}</code>"
         )
         bot.send_message(message.chat.id, txt, parse_mode="HTML", reply_markup=get_admin_keyboard())
+
+    @bot.message_handler(commands=['newapk'])
+    def handle_newapk_cmd(message):
+        if not verify_user_access(message, "verify_apk"):
+            return
+        notify_admin_log(message.from_user, "Website to APK Studio")
+        send_apk_home(message.chat.id, message.from_user.id)
 
     # ==========================================
     # 7. MEDIA UPLOAD HANDLER
@@ -1462,6 +1887,127 @@ if bot:
                 bot.edit_message_text(f"❌ ছবি প্রসেস করতে সমস্যা হয়েছে: {e}", message.chat.id, wait_m.message_id)
             return
 
+        # APK Builder - Step 2: HTML / ZIP Document
+        if state == "apk_step_html":
+            if not message.document:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.reply_to(message, "⚠️ <b>ফাইল প্রয়োজন:</b> দয়া করে <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইলটি ডকুমেন্ট (Document/File) হিসেবে পাঠান:", parse_mode="HTML", reply_markup=markup)
+                return
+
+            doc = message.document
+            filename = doc.file_name or "index.html"
+            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+            if ext not in ["html", "htm", "zip"]:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.reply_to(message, "⚠️ <b>ফরম্যাট গ্রহণযোগ্য নয়!</b> শুধুমাত্র <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইল পাঠান:", parse_mode="HTML", reply_markup=markup)
+                return
+
+            limit = MAX_ZIP_SIZE if ext == "zip" else MAX_HTML_SIZE
+            if doc.file_size and doc.file_size > limit:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.reply_to(message, f"⚠️ <b>ফাইল অনেক বড়!</b> সর্বোচ্চ {round(limit / (1024*1024))} MB পর্যন্ত অনুমোদিত। ছোট ফাইল পাঠান:", parse_mode="HTML", reply_markup=markup)
+                return
+
+            wait_m = bot.send_message(message.chat.id, "⏳ <b>ওয়েবসাইট ফাইল ডাউনলোড ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
+            try:
+                file_info = bot.get_file(doc.file_id)
+                content = bot.download_file(file_info.file_path)
+            except Exception as e:
+                bot.edit_message_text(f"❌ ফাইল ডাউনলোড করতে ব্যর্থ: {e}", message.chat.id, wait_m.message_id)
+                return
+
+            session = APK_SESSIONS.setdefault(user_id, {})
+            session["html"] = (filename, content)
+            set_state(user_id, "apk_step_icon")
+            try:
+                bot.delete_message(message.chat.id, wait_m.message_id)
+            except Exception:
+                pass
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+            next_txt = (
+                "<b>Step 3/5 — App Icon</b>\n"
+                "✅  ✅  🔵  ⚪  ⚪\n\n"
+                f"✅ ওয়েবসাইট ফাইল গৃহীত: <code>{html.escape(filename)}</code> ({round(len(content)/1024, 1)} KB)\n\n"
+                "🖼️ <b>আপনার অ্যাপের আইকন (App Icon) পাঠান:</b>\n"
+                "একটি স্ট্যান্ডার্ড PNG বা JPEG ছবি পাঠান (Photo বা Document হিসেবে, সর্বোচ্চ 6 MB, 4 Megapixels)।"
+            )
+            bot.send_message(message.chat.id, next_txt, parse_mode="HTML", reply_markup=markup)
+            return
+
+        # APK Builder - Step 3: Icon File
+        if state == "apk_step_icon":
+            filename = "icon.png"
+            file_id = None
+            if message.document:
+                doc = message.document
+                filename = doc.file_name or "icon.png"
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                if ext not in ["png", "jpg", "jpeg"]:
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                    bot.reply_to(message, "⚠️ শুধুমাত্র <b>PNG</b> অথবা <b>JPEG</b> ফরম্যাটের ছবি পাঠান:", parse_mode="HTML", reply_markup=markup)
+                    return
+                if doc.file_size and doc.file_size > MAX_ICON_SIZE:
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                    bot.reply_to(message, "⚠️ আইকন ফাইলের সাইজ অনেক বড় (সর্বোচ্চ 6 MB অনুমোদিত):", parse_mode="HTML", reply_markup=markup)
+                    return
+                file_id = doc.file_id
+            elif message.photo:
+                file_id = message.photo[-1].file_id
+                filename = "icon.jpg"
+            else:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.reply_to(message, "⚠️ অ্যাপ আইকন হিসেবে একটি PNG বা JPEG ছবি পাঠান (ফটো বা ফাইল):", parse_mode="HTML", reply_markup=markup)
+                return
+
+            wait_m = bot.send_message(message.chat.id, "⏳ <b>আইকন ভেরিফাই করা হচ্ছে...</b>", parse_mode="HTML")
+            try:
+                file_info = bot.get_file(file_id)
+                content = bot.download_file(file_info.file_path)
+            except Exception as e:
+                bot.edit_message_text(f"❌ আইকন ডাউনলোড করতে ব্যর্থ: {e}", message.chat.id, wait_m.message_id)
+                return
+
+            if len(content) > MAX_ICON_SIZE:
+                bot.edit_message_text("⚠️ আইকন ফাইলের সাইজ অনেক বড় (সর্বোচ্চ 6 MB অনুমোদিত)। ছোট ছবি দিন।", message.chat.id, wait_m.message_id)
+                return
+
+            icon_err = validate_icon(content)
+            if icon_err:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.edit_message_text(f"⚠️ <b>আইকন গ্রহণযোগ্য নয়:</b>\n{html.escape(icon_err)}\n\nদয়া করে স্ট্যান্ডার্ড PNG বা JPEG ছবি পাঠান:", message.chat.id, wait_m.message_id, parse_mode="HTML", reply_markup=markup)
+                return
+
+            session = APK_SESSIONS.get(user_id)
+            if not session or "html" not in session:
+                clear_state(user_id)
+                bot.edit_message_text("❌ সেশনের মেয়াদ শেষ হয়েছে! আবার শুরু করুন।", message.chat.id, wait_m.message_id)
+                return
+
+            if len(session["html"][1]) + len(content) > MAX_TOTAL_FILES:
+                clear_state(user_id)
+                APK_SESSIONS.pop(user_id, None)
+                bot.edit_message_text("⚠️ ওয়েবসাইট ফাইল ও আইকন একসাথে রিকুয়েস্ট লিমিট অতিক্রম করেছে। ছোট ফাইল দিয়ে আবার চেষ্টা করুন।", message.chat.id, wait_m.message_id)
+                return
+
+            session["icon"] = (filename, content)
+            clear_state(user_id)
+            try:
+                bot.delete_message(message.chat.id, wait_m.message_id)
+            except Exception:
+                pass
+
+            send_apk_confirmation(message.chat.id, user_id)
+            return
+
         if not verify_user_access(message, "verify_upload"):
             return
 
@@ -1516,10 +2062,10 @@ if bot:
 
         if data.startswith("verify_"):
             if not check_channel_joined(user_id):
-                bot.answer_callback_query(call.id, "❌ আপনি এখনো @mrghost_121 চ্যানেলে জয়েন করেননি! আগে জয়েন করে আবার চেষ্টা করুন।", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ আপনি এখনো উভয় চ্যানেলে জয়েন করেননি! আগে দুটি চ্যানেলেই জয়েন করে আবার চেষ্টা করুন।", show_alert=True)
                 return
 
-            bot.answer_callback_query(call.id, "✅ জয়েন ভেরিফিকেশন সফল হয়েছে!")
+            bot.answer_callback_query(call.id, "✅ উভয় চ্যানেলে জয়েন ভেরিফিকেশন সফল হয়েছে!")
             try:
                 bot.delete_message(chat_id, call.message.message_id)
             except Exception:
@@ -1528,19 +2074,115 @@ if bot:
             if data.startswith("verify_file|"):
                 file_code = data.split("|", 1)[1]
                 send_shared_file_by_code(chat_id, file_code)
+            elif data == "verify_apk":
+                send_apk_home(chat_id, user_id)
             else:
                 bot.send_message(
                     chat_id,
-                    "✅ <b>ভেরিফিকেশন সফল হয়েছে!</b>\nনিচের মেনু থেকে যেকোনো টুলস সম্পূর্ণ ফ্রিতে ব্যবহার করুন 👇",
+                    "✅ <b>ভেরিফিকেশন সফল হয়েছে!</b>\nনিচের মেনু থেকে যেকোনো টুলস ব্যবহার করুন 👇",
                     parse_mode="HTML",
                     reply_markup=get_main_reply_keyboard(user_id)
                 )
             return
 
         if not check_channel_joined(user_id):
-            bot.answer_callback_query(call.id, "⚠️ আগে @mrghost_121 চ্যানেলে জয়েন করুন!", show_alert=True)
+            bot.answer_callback_query(call.id, "⚠️ আগে উভয় চ্যানেলে জয়েন করুন!", show_alert=True)
             send_join_prompt(chat_id, "verify_home")
             return
+
+        # APK Builder Callbacks
+        if data.startswith("apk:"):
+            if data == "apk:new":
+                bot.answer_callback_query(call.id)
+                APK_SESSIONS[user_id] = {}
+                set_state(user_id, "apk_step_name")
+                prompt_txt = (
+                    "<b>Step 1/5 — App Name</b>\n"
+                    "🔵  ⚪  ⚪  ⚪  ⚪\n\n"
+                    "📛 <b>আপনার অ্যাপটির নাম কী হবে?</b>\n\n"
+                    "অ্যাপের নাম লিখে পাঠান (১ থেকে ৮০ অক্ষরের মধ্যে):"
+                )
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.send_message(chat_id, prompt_txt, parse_mode="HTML", reply_markup=markup)
+                return
+
+            elif data == "apk:help":
+                bot.answer_callback_query(call.id)
+                apk_help = (
+                    "<b>📘 How it works — Website to APK</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    "<b>১.</b> <b>Create APK</b> বাটনে চাপুন।\n"
+                    "<b>২.</b> অ্যাপের নাম (App Name) লিখে পাঠান (১–৮০ অক্ষর)।\n"
+                    "<b>৩.</b> ওয়েবসাইটের ফাইল <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ডকুমেন্ট হিসেবে পাঠান (সর্বোচ্চ 10 MB)।\n"
+                    "<b>৪.</b> অ্যাপের আইকন হিসেবে PNG বা JPEG ছবি পাঠান (সর্বোচ্চ 6 MB, 4 MP)।\n"
+                    "<b>৫.</b> রিভিউ দেখে <b>Build APK</b> বাটনে চাপুন।\n\n"
+                    "⚡ কিছুক্ষণের মধ্যেই আপনার কাঙ্ক্ষিত অ্যান্ড্রয়েড APK ফাইল তৈরি হয়ে চ্যাটে চলে আসবে!"
+                )
+                markup = types.InlineKeyboardMarkup(row_width=2)
+                markup.add(
+                    types.InlineKeyboardButton("🚀 Create APK", callback_data="apk:new"),
+                    types.InlineKeyboardButton("⬅️ Back to Studio", callback_data="apk:home")
+                )
+                try:
+                    if call.message.content_type == "photo":
+                        bot.edit_message_caption(apk_help, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+                    else:
+                        bot.edit_message_text(apk_help, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+                except Exception:
+                    bot.send_message(chat_id, apk_help, parse_mode="HTML", reply_markup=markup)
+                return
+
+            elif data == "apk:home":
+                bot.answer_callback_query(call.id)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except Exception:
+                    pass
+                send_apk_home(chat_id, user_id)
+                return
+
+            elif data == "apk:cancel":
+                bot.answer_callback_query(call.id, "বাতিল করা হয়েছে")
+                clear_state(user_id)
+                APK_SESSIONS.pop(user_id, None)
+                try:
+                    bot.edit_message_text("✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                except Exception:
+                    bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
+                return
+
+            elif data == "apk:rename":
+                session = APK_SESSIONS.get(user_id)
+                if not session:
+                    bot.answer_callback_query(call.id, "Session expired. Start again.", show_alert=True)
+                    return
+                bot.answer_callback_query(call.id)
+                set_state(user_id, "apk_step_name_rename")
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.send_message(
+                    chat_id,
+                    "<b>Step 1/5 — Rename App</b>\n"
+                    "🔵  ⚪  ⚪  ⚪  ⚪\n\n"
+                    "📛 <b>নতুন অ্যাপের নাম লিখে পাঠান (১-৮০ অক্ষর):</b>",
+                    parse_mode="HTML",
+                    reply_markup=markup
+                )
+                return
+
+            elif data == "apk:build":
+                session = APK_SESSIONS.get(user_id)
+                if not session or "html" not in session or "icon" not in session:
+                    bot.answer_callback_query(call.id, "Session expired. Start again.", show_alert=True)
+                    return
+                bot.answer_callback_query(call.id, "Build started")
+                try:
+                    bot.edit_message_text("⚙️ <b>Preparing your APK build...</b>\n<i>This may take up to two minutes.</i>", chat_id, call.message.message_id, parse_mode="HTML")
+                except Exception:
+                    pass
+                threading.Thread(target=build_apk_task, args=(chat_id, user_id, call.message.message_id), daemon=True).start()
+                return
 
         if data == "act_upload":
             bot.answer_callback_query(call.id)
@@ -1670,12 +2312,58 @@ if bot:
             elif text == "☠️ Ban List":
                 handle_banlist_cmd(message)
                 return
+            elif text == "💰 User Coin (+/-)":
+                set_state(user.id, "admin_manage_coins")
+                msg = (
+                    "💰 <b>ইউজারের কয়েন নিয়ন্ত্রণ (Add / Deduct)</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    "কয়েন যোগ বা বিয়োগ করতে নিচের ফরম্যাটে পাঠান:\n"
+                    "• কয়েন যোগ করতে: <code>USER_ID +AMOUNT</code> (যেমন: <code>5140546628 +20</code>)\n"
+                    "• কয়েন কাটতে: <code>USER_ID -AMOUNT</code> (যেমন: <code>5140546628 -10</code>)\n"
+                    "• ব্যালেন্স নির্দিষ্ট করতে: <code>USER_ID AMOUNT</code> (যেমন: <code>5140546628 50</code>)\n\n"
+                    "👇 <b>এখন ইউজার আইডি ও অ্যামাউন্ট লিখে পাঠান:</b>\n"
+                    "(বাতিল করতে 🏠 Home চাপুন)"
+                )
+                bot.send_message(chat_id, msg, parse_mode="HTML")
+                return
+            elif text == "🎁 Set Daily Bonus":
+                set_state(user.id, "admin_set_daily_bonus")
+                curr = get_daily_bonus_amount()
+                msg = (
+                    "🎁 <b>কাস্টম ডেইলি বোনাস সেটিং</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"বর্তমান ডেইলি বোনাস: <b>{curr} Coins</b>\n\n"
+                    "ইউজারদের প্রতিদিন কত কয়েন বোনাস দিতে চান তা সংখ্যায় লিখে পাঠান (যেমন: 5, 10, 20):\n"
+                    "(বাতিল করতে 🏠 Home চাপুন)"
+                )
+                bot.send_message(chat_id, msg, parse_mode="HTML")
+                return
+            elif text == "📢 Channel 2 ID":
+                set_state(user.id, "admin_set_channel2")
+                c2 = get_setting("required_channel_2_id") or "Not Configured"
+                msg = (
+                    "📢 <b>VIP CHANNEL 2 CONFIGURATION</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"🔗 <b>Invite Link:</b> {REQUIRED_CHANNEL_2_URL}\n"
+                    f"🆔 <b>Current Channel ID:</b> <code>{c2}</code>\n\n"
+                    "👉 চ্যানেলটির Numeric ID সেট করতে সরাসরি আইডি লিখে পাঠান (যেমন: <code>-1001234567890</code>) অথবা ওই চ্যানেল থেকে যেকোনো একটি পোস্ট/মেসেজ বটকে Forward করুন!\n"
+                    "(বাতিল করতে 🏠 Home চাপুন)"
+                )
+                bot.send_message(chat_id, msg, parse_mode="HTML")
+                return
+
+            if message.forward_from_chat and message.forward_from_chat.type in ["channel", "supergroup"]:
+                f_chat = message.forward_from_chat
+                set_setting("required_channel_2_id", str(f_chat.id))
+                bot.reply_to(message, f"✅ <b>Channel 2 ID স্বয়ংক্রিয়ভাবে ডিটেক্ট ও সেভ হয়েছে!</b>\n\n📢 <b>Title:</b> {html.escape(f_chat.title or '')}\n🆔 <b>Chat ID:</b> <code>{f_chat.id}</code>", parse_mode="HTML")
+                clear_state(user.id)
+                return
 
         if not verify_user_access(message, "verify_home"):
             return
 
         menu_buttons = {
-            "📂 File Sharing Bot", "📤 Upload File", "📊 Stats", "ℹ️ Help",
+            "📂 File Sharing Bot", "📱 Website to APK", "📤 Upload File", "📊 Stats", "ℹ️ Help",
             "🎥 YouTube Downloader", "📹 Facebook Download", "🎵 TikTok Download",
             "📸 Instagram Download", "📌 Pinterest Download",
             "🖼️ Thumbnail Downloader", "📝 Yt Title Tags Extract", "📝 TikTok Title Extract",
@@ -1683,11 +2371,11 @@ if bot:
             "📞 Number to Info", "🔳 Qr Maker",
             "🔐 Encode & Decode", "🛡️ Link Checker",
             "🌍 IP Tracker", "💫 Whatsapp Opener", "🪪 Visa / Master Card Maker",
-            "💳 CC Generator", "💳 Get Free Card", "🆔 BD NID Tools",
-            "🪪 Aadhaar Tools", "⚠️ SMS BOMBER"
+            "💳 CC Generator", "💳 Get Free Card", "🎁 Daily Bonus", "💰 My Balance",
+            "🆔 BD NID Tools", "🪪 Aadhaar Tools", "⚠️ SMS BOMBER"
         }
 
-        if text in menu_buttons:
+        if text in menu_buttons or text.startswith("💳 Get Card"):
             clear_state(user.id)
 
             if text == "📂 File Sharing Bot":
@@ -1698,6 +2386,11 @@ if bot:
                     "👇 নিচের বাটন থেকে নির্বাচন করুন অথবা সরাসরি ফাইল পাঠান:"
                 )
                 bot.send_message(chat_id, panel_txt, parse_mode="HTML", reply_markup=get_file_sharing_keyboard())
+                return
+
+            elif text == "📱 Website to APK":
+                notify_admin_log(user, "Website to APK Studio")
+                send_apk_home(chat_id, user.id)
                 return
 
             elif text == "📤 Upload File":
@@ -1711,6 +2404,7 @@ if bot:
 
             elif text == "📊 Stats":
                 _, user_up, total_f = get_user_stats(user.id)
+                user_coins = get_user_coins(user.id)
                 stats_msg = (
                     "📊 <b>𝐔𝐒𝐄𝐑 𝐀𝐂𝐂𝐎𝐔𝐍𝐓 𝐒𝐓𝐀𝐓𝐈𝐒𝐓𝐈𝐂𝐒</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1721,11 +2415,13 @@ if bot:
                     "📈 <b>অ্যাক্টিভিটি ও স্ট্যাটাস:</b>\n"
                     "• সাবস্ক্রিপশন: <b>Free Lifetime Access ⚡</b>\n"
                     f"• আপনার আপলোডকৃত ফাইল: <b>{user_up}</b> টি\n"
+                    f"• আপনার কয়েন ব্যালেন্স: <b>{user_coins} Coins 💰</b>\n"
                     "• ক্লাউড স্টোরেজ: <b>Unlimited Storage</b>\n\n"
                     "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
                 )
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
+                markup.add(types.InlineKeyboardButton("📢 Join VIP Channel 2", url=REQUIRED_CHANNEL_2_URL))
                 markup.add(types.InlineKeyboardButton("📤 Upload New File", callback_data="act_upload"))
                 bot.send_message(chat_id, stats_msg, parse_mode="HTML", reply_markup=markup)
                 return
@@ -1916,9 +2612,21 @@ if bot:
 
             elif text == "🪪 Visa / Master Card Maker":
                 notify_admin_log(user, "Visa / Master Card Hub")
+                user_coins = get_user_coins(user.id)
+                cost = get_card_cost()
+                daily_b = get_daily_bonus_amount()
+                msg = (
+                    "💳 <b>𝐕𝐈𝐒𝐀 / 𝐌𝐀𝐒𝐓𝐄𝐑 𝐂𝐀𝐑𝐃 𝐇𝐔𝐁</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    "⚡ <b>কয়েন সিস্টেম তথ্য:</b>\n"
+                    f"• ১টি প্রিমিয়াম কার্ড নিতে <b>{cost} Coins</b> প্রয়োজন।\n"
+                    f"• আপনার বর্তমান ব্যালেন্স: <b>{user_coins} Coins 💰</b>\n"
+                    f"• প্রতিদিন ফ্রি <b>{daily_b} Coins</b> পেতে <b>🎁 Daily Bonus</b> এ ক্লিক করুন!\n\n"
+                    "👇 <b>নিচের মেনু থেকে আপনার প্রয়োজনীয় অপশন নির্বাচন করুন:</b>"
+                )
                 bot.send_message(
                     chat_id,
-                    "💳 <b>Visa / Master Card Tools</b>\n\nনিচের বাটন থেকে আপনার প্রয়োজনীয় অপশন নির্বাচন করুন 👇",
+                    msg,
                     parse_mode="HTML",
                     reply_markup=get_visa_menu_keyboard()
                 )
@@ -1934,17 +2642,80 @@ if bot:
                 )
                 return
 
-            elif text == "💳 Get Free Card":
+            elif text.startswith("💳 Get Card") or text == "💳 Get Free Card":
+                notify_admin_log(user, "Card Purchase")
+                user_coins = get_user_coins(user.id)
+                cost = get_card_cost()
+                if user_coins < cost:
+                    msg = (
+                        "❌ <b>কয়েন অপর্যাপ্ত! | Insufficient Coins</b>\n"
+                        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"💳 ১টি প্রিমিয়াম কার্ড নিতে <b>{cost} Coins</b> প্রয়োজন।\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{user_coins} Coins</b>\n\n"
+                        "👉 ফ্রিতে কয়েন পেতে নিচের <b>🎁 Daily Bonus</b> বাটনে চাপ দিন অথবা এডমিনের সাথে যোগাযোগ করুন।"
+                    )
+                    bot.send_message(chat_id, msg, parse_mode="HTML")
+                    return
+
                 card = pop_card_db()
                 if not card:
                     bot.send_message(chat_id, "😢 দুঃখিত! এই মুহূর্তে কোনো কার্ড স্টকে নেই। এডমিনকে জানান।")
                 else:
+                    new_bal = deduct_user_coins(user.id, cost)
                     random_zip = random.randint(10000, 99999)
                     bot.send_message(
                         chat_id,
-                        f"🎁 <b>আপনার কার্ড:</b>\n<code>{html.escape(card)}</code>\n\n📌 <b>Random US ZIP:</b> <code>{random_zip}</code>\n\n<i>(কার্ড ও জিপ কোডের ওপর ক্লিক করলেই কপি হয়ে যাবে)</i>",
+                        f"🎁 <b>আপনার প্রিমিয়াম কার্ড:</b>\n"
+                        f"<code>{html.escape(card)}</code>\n\n"
+                        f"📌 <b>Random US ZIP:</b> <code>{random_zip}</code>\n"
+                        f"💰 <b>কাটা হয়েছে:</b> -{cost} Coins\n"
+                        f"💵 <b>অবশিষ্ট ব্যালেন্স:</b> <code>{new_bal}</code> Coins\n\n"
+                        f"<i>(কার্ড ও জিপ কোডের ওপর ক্লিক করলেই কপি হয়ে যাবে)</i>",
                         parse_mode="HTML"
                     )
+                return
+
+            elif text == "🎁 Daily Bonus":
+                notify_admin_log(user, "Daily Bonus Claim")
+                claimed, bonus_or_hours, mins, new_bal = claim_daily_bonus(user.id)
+                if claimed:
+                    bot.send_message(
+                        chat_id,
+                        f"🎉 <b>𝐃𝐀𝐈𝐋𝐘 𝐁𝐎𝐍𝐔𝐒 𝐂𝐋𝐀𝐈𝐌𝐄𝐃!</b>\n"
+                        f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"✅ আপনি আজকের ডেইলি বোনাস হিসেবে <b>+{bonus_or_hours} Coins</b> পেয়েছেন!\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{new_bal} Coins</b>\n\n"
+                        f"⏰ পরবর্তী বোনাস ২৪ ঘণ্টা পর আবার সংগ্রহ করতে পারবেন।",
+                        parse_mode="HTML"
+                    )
+                else:
+                    bot.send_message(
+                        chat_id,
+                        f"⏳ <b>বোনাস ইতিমধ্যে সংগ্রহ করা হয়েছে!</b>\n"
+                        f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"❌ আপনি আজকের ডেইলি বোনাস ইতিমধ্যে সংগ্রহ করেছেন।\n"
+                        f"🕒 পরবর্তী বোনাস পাওয়া যাবে: <b>{bonus_or_hours} ঘণ্টা {mins} মিনিট</b> পর।\n\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{new_bal} Coins</b>",
+                        parse_mode="HTML"
+                    )
+                return
+
+            elif text == "💰 My Balance":
+                user_coins = get_user_coins(user.id)
+                cost = get_card_cost()
+                daily_b = get_daily_bonus_amount()
+                bot.send_message(
+                    chat_id,
+                    f"💰 <b>𝐘𝐎𝐔𝐑 𝐖𝐀𝐋𝐋𝐄𝐓 𝐁𝐀𝐋𝐀𝐍𝐂𝐄</b>\n"
+                    f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"👤 <b>User:</b> {html.escape(user.first_name or 'User')}\n"
+                    f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
+                    f"💎 <b>কয়েন ব্যালেন্স:</b> <b>{user_coins} Coins</b>\n\n"
+                    f"💳 প্রতি কার্ডের মূল্য: <b>{cost} Coins</b>\n"
+                    f"🎁 দৈনিক ফ্রি বোনাস: <b>{daily_b} Coins</b>\n\n"
+                    f"⚡ <i>(শুধুমাত্র Visa / Master Card কিনতে কয়েন ব্যবহৃত হয়, বাকি সব টুলস ফ্রি!)</i>",
+                    parse_mode="HTML"
+                )
                 return
 
             elif text == "🆔 BD NID Tools":
@@ -1979,7 +2750,81 @@ if bot:
         # ==========================================
         state = get_state(user.id)
 
-        if state == "admin_upload_cookie" and user.id in ADMIN_IDS:
+        # APK Builder States
+        if state in ["apk_step_name", "apk_step_name_rename"]:
+            if text in ["✖️ Cancel", "/cancel"]:
+                clear_state(user.id)
+                APK_SESSIONS.pop(user.id, None)
+                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
+                return
+
+            name_err = validate_app_name(text)
+            if name_err:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+                bot.send_message(chat_id, f"⚠️ <b>ভুল অ্যাপ নাম:</b> {html.escape(name_err)}\n\nদয়া করে সঠিক নাম পাঠান (১-৮০ অক্ষর):", parse_mode="HTML", reply_markup=markup)
+                return
+
+            if state == "apk_step_name_rename":
+                session = APK_SESSIONS.get(user.id)
+                if session:
+                    session["app_name"] = text
+                    clear_state(user.id)
+                    send_apk_confirmation(chat_id, user.id)
+                else:
+                    clear_state(user.id)
+                    bot.send_message(chat_id, "❌ সেশনের মেয়াদ শেষ হয়েছে! আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user.id))
+                return
+
+            APK_SESSIONS[user.id] = {"app_name": text}
+            set_state(user.id, "apk_step_html")
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+            bot.send_message(
+                chat_id,
+                "<b>Step 2/5 — Website Files</b>\n"
+                "✅  🔵  ⚪  ⚪  ⚪\n\n"
+                f"✅ সংরক্ষিত নাম: <b>{html.escape(text)}</b>\n\n"
+                "📄 <b>আপনার ওয়েবসাইটের ফাইল আপলোড করুন:</b>\n"
+                "একটি <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইল ডকুমেন্ট (Document) হিসেবে পাঠান (সর্বোচ্চ 10 MB)।",
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+            return
+
+        elif state == "apk_step_html":
+            if text in ["✖️ Cancel", "/cancel"]:
+                clear_state(user.id)
+                APK_SESSIONS.pop(user.id, None)
+                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
+                return
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+            bot.send_message(
+                chat_id,
+                "⚠️ <b>ডকুমেন্ট ফাইল প্রয়োজন:</b>\n\nদয়া করে আপনার ওয়েবসাইট ফাইলটি ডকুমেন্ট (Document/File) হিসেবে পাঠান (যেমন: <code>index.html</code> অথবা <code>project.zip</code>) বা বাতিল করতে ✖️ Cancel চাপুন।",
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+            return
+
+        elif state == "apk_step_icon":
+            if text in ["✖️ Cancel", "/cancel"]:
+                clear_state(user.id)
+                APK_SESSIONS.pop(user.id, None)
+                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
+                return
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
+            bot.send_message(
+                chat_id,
+                "⚠️ <b>ছবি/আইকন প্রয়োজন:</b>\n\nদয়া করে আপনার অ্যাপ আইকনটি ফটো বা ডকুমেন্ট (PNG/JPEG) হিসেবে পাঠান বা বাতিল করতে ✖️ Cancel চাপুন।",
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+            return
+
+        elif state == "admin_upload_cookie" and user.id in ADMIN_IDS:
             clear_state(user.id)
             with open("cookies.txt", "w", encoding="utf-8") as f:
                 f.write(text)
@@ -2027,6 +2872,69 @@ if bot:
                 bot.send_message(chat_id, f"✅ User <code>{text}</code> কে আনব্যান করা হয়েছে।", parse_mode="HTML")
             else:
                 bot.send_message(chat_id, "❌ সঠিক সংখ্যাবাচক User ID দিন।")
+            return
+
+        elif state == "admin_manage_coins" and user.id in ADMIN_IDS:
+            clear_state(user.id)
+            parts = text.split()
+            if len(parts) >= 2 and (parts[0].isdigit() or (parts[0].startswith("-") and parts[0][1:].isdigit())):
+                target_uid = int(parts[0])
+                amt_str = parts[1]
+                diff_text = ""
+                if amt_str.startswith("+") and amt_str[1:].isdigit():
+                    amt = int(amt_str[1:])
+                    new_b = add_user_coins(target_uid, amt)
+                    diff_text = f"+{amt}"
+                elif amt_str.startswith("-") and amt_str[1:].isdigit():
+                    amt = int(amt_str[1:])
+                    new_b = deduct_user_coins(target_uid, amt)
+                    diff_text = f"-{amt}"
+                elif amt_str.isdigit():
+                    amt = int(amt_str)
+                    set_user_coins(target_uid, amt)
+                    new_b = amt
+                    diff_text = f"Set to {amt}"
+                else:
+                    bot.send_message(chat_id, "❌ ভুল ফরম্যাট! উদাহরণ: <code>12345678 +20</code> বা <code>12345678 -10</code>", parse_mode="HTML")
+                    return
+
+                bot.send_message(
+                    chat_id,
+                    f"✅ <b>ইউজার ব্যালেন্স সফলভাবে আপডেট হয়েছে!</b>\n\n"
+                    f"👤 <b>User ID:</b> <code>{target_uid}</code>\n"
+                    f"📊 <b>পরিবর্তন:</b> <code>{diff_text}</code> Coins\n"
+                    f"💰 <b>বর্তমান ব্যালেন্স:</b> <b>{new_b} Coins</b>",
+                    parse_mode="HTML"
+                )
+                try:
+                    bot.send_message(
+                        target_uid,
+                        f"🔔 <b>আপনার ওয়ালেট ব্যালেন্স আপডেট হয়েছে!</b>\n\n"
+                        f"এডমিন আপনার অ্যাকাউন্টে <b>{diff_text} Coins</b> আপডেট করেছেন।\n"
+                        f"💰 বর্তমান ব্যালেন্স: <b>{new_b} Coins</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+            else:
+                bot.send_message(chat_id, "❌ ফরম্যাট সঠিক নয়! উদাহরণ: <code>12345678 +20</code>", parse_mode="HTML")
+            return
+
+        elif state == "admin_set_daily_bonus" and user.id in ADMIN_IDS:
+            clear_state(user.id)
+            if text.isdigit() and int(text) > 0:
+                new_amt = int(text)
+                set_daily_bonus_amount(new_amt)
+                bot.send_message(chat_id, f"✅ <b>ডেইলি বোনাস সফলভাবে {new_amt} Coins এ সেট করা হয়েছে!</b>", parse_mode="HTML")
+            else:
+                bot.send_message(chat_id, "❌ দয়া করে একটি সঠিক ধনাত্মক সংখ্যা দিন (যেমন: 5, 10, 20)।", parse_mode="HTML")
+            return
+
+        elif state == "admin_set_channel2" and user.id in ADMIN_IDS:
+            clear_state(user.id)
+            raw_id = text.strip()
+            set_setting("required_channel_2_id", raw_id)
+            bot.send_message(chat_id, f"✅ <b>Channel 2 ID সফলভাবে সেট করা হয়েছে:</b> <code>{html.escape(raw_id)}</code>", parse_mode="HTML")
             return
 
         # Encode / Decode State Execution
@@ -2326,6 +3234,16 @@ if bot:
             parse_mode="HTML",
             reply_markup=get_main_reply_keyboard(user.id)
         )
+
+    @bot.my_chat_member_handler()
+    def handle_my_chat_member_event(update):
+        try:
+            chat = update.chat
+            if chat.type in ["channel", "supergroup"]:
+                set_setting("required_channel_2_id", str(chat.id))
+                print(f"[*] Auto-detected VIP Channel ID: {chat.id} ({chat.title})", flush=True)
+        except Exception as e:
+            print(f"[!] Error in my_chat_member: {e}", flush=True)
 
 
 # ==========================================
