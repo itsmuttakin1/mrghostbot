@@ -184,18 +184,19 @@ def resolve_url(url):
         return url
 
 FFMPEG_DIR = os.path.abspath("ffmpeg_bin") if os.path.exists("ffmpeg_bin") else None
+HAS_FFMPEG = bool(FFMPEG_DIR or shutil.which("ffmpeg"))
 
 def get_ydl_options(output_path):
+    fmt = 'best[height<=720]/bestvideo[height<=720]+bestaudio/22/18/b[ext=mp4]/best' if HAS_FFMPEG else '22/18/b[ext=mp4]/best[ext=mp4]/best'
     opts = {
-        'format': 'best[height<=720]/bestvideo[height<=720]+bestaudio/best',
-        'merge_output_format': 'mp4',
+        'format': fmt,
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
         'no_check_certificates': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios']
+                'player_client': ['android']
             }
         }
     }
@@ -1221,48 +1222,11 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
             download_and_send_tiktok(user_id, target_url)
             return
 
-        # Attempt retry with Android progressive format
-        try:
-            retry_opts = {
-                'format': '18/best[height<=480]/best',
-                'outtmpl': out_template,
-                'quiet': True,
-                'no_warnings': True,
-                'no_check_certificates': True,
-                'extractor_args': {'youtube': {'player_client': ['android']}}
-            }
-            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
-                info_r = ydl_retry.extract_info(target_url, download=True)
-                r_title = (info_r.get('title') if info_r else None) or "Video"
-            files_r = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
-            if files_r:
-                file_path_r = files_r[0]
-                escaped_title = html.escape(r_title[:200])
-                caption_text = (
-                    f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
-                    f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
-                    f"<code>{escaped_title}</code>\n\n"
-                    f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
-                )
-                with open(file_path_r, 'rb') as vf:
-                    bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
-                try:
-                    bot.delete_message(user_id, msg_id)
-                except Exception:
-                    pass
-                return
-        except Exception:
-            pass
-
-        # Try Cobalt fallback for YouTube / general
+        # Fallback to cobalt
         if fallback_cobalt_download(user_id, target_url, msg_id):
             return
 
-        err_msg = "⚠️ দুঃখিত, ভিডিওটি ডাউনলোড করা সম্ভব হয়নি। লিংকটি সঠিক কিনা বা পাবলিক কিনা যাচাই করুন।"
-        try:
-            bot.edit_message_text(err_msg, user_id, msg_id, parse_mode="HTML")
-        except Exception:
-            pass
+        bot.edit_message_text(f"⚠️ ডাউনলোড ব্যর্থ হয়েছে: {err_str[:120]}", user_id, msg_id, parse_mode="HTML")
     finally:
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir, ignore_errors=True)
