@@ -7,6 +7,9 @@ import html
 import uuid
 import shutil
 import random
+import socket
+import base64
+import codecs
 import sqlite3
 import traceback
 import threading
@@ -17,6 +20,8 @@ import telebot
 from telebot import types
 import yt_dlp
 import requests
+import phonenumbers
+from phonenumbers import geocoder, carrier, timezone
 
 # ==========================================
 # 1. FLASK WEB SERVER & CONFIGURATION
@@ -28,6 +33,9 @@ ADMIN_IDS = [5140546628, 7728010216, 8967715315]
 PRIMARY_ADMIN = 5140546628
 REQUIRED_CHANNEL = "@mrghost_121"
 CHANNEL_URL = "https://t.me/mrghost_121"
+IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "").strip()
+
+START_PHOTO_PATH = "start_photo.jpg"
 
 if not BOT_TOKEN:
     print("❌ CRITICAL ERROR: BOT_TOKEN is missing in Environment Variables!", flush=True)
@@ -186,13 +194,14 @@ def get_ydl_options(output_path):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web']
+                'player_client': ['ios', 'android', 'mweb'],
+                'player_skip': ['webpage', 'configs']
             }
         }
     }
     if FFMPEG_DIR:
         opts['ffmpeg_location'] = FFMPEG_DIR
-    if os.path.exists("cookies.txt"):
+    if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
         opts['cookiefile'] = "cookies.txt"
     return opts
 
@@ -248,7 +257,7 @@ def run_web_server():
 
 
 # ==========================================
-# 2. SQLITE DATABASE (NO COIN SYSTEM)
+# 2. SQLITE DATABASE
 # ==========================================
 DB_PATH = "bot_database.db"
 db_mutex = threading.Lock()
@@ -297,6 +306,7 @@ def init_db():
             )
         """)
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_mode', '0')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('start_photo_protection', '1')")
         conn.commit()
         conn.close()
 
@@ -363,6 +373,23 @@ def set_maintenance(state):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("UPDATE settings SET value = ? WHERE key = 'maintenance_mode'", ('1' if state else '0',))
+        conn.commit()
+        conn.close()
+
+def is_photo_protection_enabled():
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = 'start_photo_protection'")
+        row = cursor.fetchone()
+        conn.close()
+        return bool(not row or row[0] == '1')
+
+def set_photo_protection(state: bool):
+    with db_mutex:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('start_photo_protection', ?)", ('1' if state else '0',))
         conn.commit()
         conn.close()
 
@@ -532,100 +559,146 @@ def notify_admin_log(user, tool_name):
 
 
 # ==========================================
-# 4. KEYBOARD MENUS (NO APK / NO COINS)
+# 4. KEYBOARD MENUS (COLORED BUTTONS)
 # ==========================================
 def get_main_reply_keyboard(user_id=None):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.row(types.KeyboardButton("📂 File Sharing Bot"))
+    
+    # Row 1: File Sharing (Green / Success)
     markup.row(
-        types.KeyboardButton("🎥 YouTube Downloader"),
-        types.KeyboardButton("📹 Facebook Download")
+        types.KeyboardButton("📂 File Sharing Bot", style="success")
     )
+    # Row 2: YouTube (Red / Danger) | Facebook (Blue / Primary)
     markup.row(
-        types.KeyboardButton("🎵 TikTok Download"),
-        types.KeyboardButton("🖼️ Thumbnail Downloader")
+        types.KeyboardButton("🎥 YouTube Downloader", style="danger"),
+        types.KeyboardButton("📹 Facebook Download", style="primary")
     )
+    # Row 3: TikTok (Blue / Primary) | Instagram (Red / Danger)
     markup.row(
-        types.KeyboardButton("📝 Yt Title Tags Extract"),
-        types.KeyboardButton("📝 TikTok Title Extract")
+        types.KeyboardButton("🎵 TikTok Download", style="primary"),
+        types.KeyboardButton("📸 Instagram Download", style="danger")
     )
+    # Row 4: Pinterest (Red / Danger) | Thumbnail (Green / Success)
     markup.row(
-        types.KeyboardButton("📞 Number to Info"),
-        types.KeyboardButton("🔳 Qr Maker")
+        types.KeyboardButton("📌 Pinterest Download", style="danger"),
+        types.KeyboardButton("🖼️ Thumbnail Downloader", style="success")
     )
+    # Row 5: Image to Link (Blue / Primary) | Live TV (Green / Success)
     markup.row(
-        types.KeyboardButton("🖼️ Background Remover"),
-        types.KeyboardButton("🔐 Encode & Decode")
+        types.KeyboardButton("🖼️ Image to Link", style="primary"),
+        types.KeyboardButton("📺 Live TV", style="success")
     )
+    # Row 6: Number to Info (Green / Success) | QR Maker (Blue / Primary)
     markup.row(
-        types.KeyboardButton("🛡️ Link Checker"),
-        types.KeyboardButton("📊 YouTube Watchtime")
+        types.KeyboardButton("📞 Number to Info", style="success"),
+        types.KeyboardButton("🔳 Qr Maker", style="primary")
     )
+    # Row 7: Encode & Decode (Red / Danger) | Link Checker (Green / Success)
     markup.row(
-        types.KeyboardButton("🌍 IP Tracker"),
-        types.KeyboardButton("💫 Whatsapp Opener")
+        types.KeyboardButton("🔐 Encode & Decode", style="danger"),
+        types.KeyboardButton("🛡️ Link Checker", style="success")
     )
+    # Row 8: Title/Tags Extract (Red / Danger) | TikTok Title Extract (Blue / Primary)
     markup.row(
-        types.KeyboardButton("🪪 Visa / Master Card Maker"),
-        types.KeyboardButton("🆔 BD NID Tools")
+        types.KeyboardButton("📝 Yt Title Tags Extract", style="danger"),
+        types.KeyboardButton("📝 TikTok Title Extract", style="primary")
     )
+    # Row 9: IP Tracker (Blue / Primary) | WhatsApp (Green / Success)
     markup.row(
-        types.KeyboardButton("🪪 Aadhaar Tools"),
-        types.KeyboardButton("⚠️ SMS BOMBER")
+        types.KeyboardButton("🌍 IP Tracker", style="primary"),
+        types.KeyboardButton("💫 Whatsapp Opener", style="success")
     )
+    # Row 10: Card Maker (Blue / Primary) | NID Tools (Red / Danger)
     markup.row(
-        types.KeyboardButton("😫 Google Photos"),
-        types.KeyboardButton("🎓 Tutorials Hub")
+        types.KeyboardButton("🪪 Visa / Master Card Maker", style="primary"),
+        types.KeyboardButton("🆔 BD NID Tools", style="danger")
     )
+    # Row 11: Aadhaar Tools (Blue / Primary) | SMS Bomber (Red / Danger)
     markup.row(
-        types.KeyboardButton("📊 Stats"),
-        types.KeyboardButton("ℹ️ Help")
+        types.KeyboardButton("🪪 Aadhaar Tools", style="primary"),
+        types.KeyboardButton("⚠️ SMS BOMBER", style="danger")
     )
-    if user_id in ADMIN_IDS:
-        markup.row(types.KeyboardButton("⚙️ Admin Panel"))
+    # Row 12: Stats (Blue / Primary) | Help (Green / Success)
+    markup.row(
+        types.KeyboardButton("📊 Stats", style="primary"),
+        types.KeyboardButton("ℹ️ Help", style="success")
+    )
     return markup
 
 def get_file_sharing_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton("📤 Upload File"),
-        types.KeyboardButton("📊 Stats")
+        types.KeyboardButton("📤 Upload File", style="primary"),
+        types.KeyboardButton("📊 Stats", style="success")
     )
-    markup.row(types.KeyboardButton("🏠 Home"))
+    markup.row(types.KeyboardButton("🏠 Home", style="danger"))
     return markup
 
 def get_visa_menu_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton("💳 CC Generator"),
-        types.KeyboardButton("💳 Get Free Card")
+        types.KeyboardButton("💳 CC Generator", style="primary"),
+        types.KeyboardButton("💳 Get Free Card", style="success")
     )
-    markup.row(types.KeyboardButton("🏠 Home"))
+    markup.row(types.KeyboardButton("🏠 Home", style="danger"))
     return markup
 
 def get_admin_keyboard():
     maint = is_maintenance()
     maint_btn = "🔴 Maintenance OFF" if maint else "🟢 Maintenance ON"
+    protect = is_photo_protection_enabled()
+    protect_btn = "🔒 Photo Protect: ON" if protect else "🔓 Photo Protect: OFF"
+    has_cookie = os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0
+    cookie_btn = "🍪 Cookie: ACTIVE" if has_cookie else "🍪 Upload Cookie"
+
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton("📢 Broadcast"),
-        types.KeyboardButton("👥 Total Users")
+        types.KeyboardButton("📢 Broadcast", style="primary"),
+        types.KeyboardButton("👥 Total Users", style="success")
     )
     markup.row(
-        types.KeyboardButton("➕ Add Bulk Cards"),
-        types.KeyboardButton("💳 Card Stock")
+        types.KeyboardButton("➕ Add Bulk Cards", style="primary"),
+        types.KeyboardButton("💳 Card Stock", style="success")
     )
     markup.row(
-        types.KeyboardButton("🗑️ Delete Stock"),
-        types.KeyboardButton("🚫 Ban User")
+        types.KeyboardButton("🗑️ Delete Stock", style="danger"),
+        types.KeyboardButton(cookie_btn, style="primary")
     )
     markup.row(
-        types.KeyboardButton("✅ Unban User"),
-        types.KeyboardButton("☠️ Ban List")
+        types.KeyboardButton("🚫 Ban User", style="danger"),
+        types.KeyboardButton("✅ Unban User", style="success")
     )
     markup.row(
-        types.KeyboardButton(maint_btn),
-        types.KeyboardButton("🏠 Home")
+        types.KeyboardButton("☠️ Ban List", style="danger"),
+        types.KeyboardButton(maint_btn, style="danger" if maint else "success")
+    )
+    markup.row(
+        types.KeyboardButton(protect_btn, style="success" if protect else "danger"),
+        types.KeyboardButton("🏠 Home", style="primary")
+    )
+    return markup
+
+def get_encode_decode_keyboard():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        types.InlineKeyboardButton("🔒 Base64 Encode", callback_data="op_enc_b64"),
+        types.InlineKeyboardButton("🔓 Base64 Decode", callback_data="op_dec_b64")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🌐 URL Encode", callback_data="op_enc_url"),
+        types.InlineKeyboardButton("🔄 URL Decode", callback_data="op_dec_url")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🔢 Hex Encode", callback_data="op_enc_hex"),
+        types.InlineKeyboardButton("🔤 Hex Decode", callback_data="op_dec_hex")
+    )
+    markup.row(
+        types.InlineKeyboardButton("0️⃣1️⃣ Binary Encode", callback_data="op_enc_bin"),
+        types.InlineKeyboardButton("🔠 Binary Decode", callback_data="op_dec_bin")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🔄 ROT13 Cipher", callback_data="op_enc_rot13"),
+        types.InlineKeyboardButton("🔃 Reverse Text", callback_data="op_text_rev")
     )
     return markup
 
@@ -655,7 +728,7 @@ def send_shared_file_by_code(chat_id, file_code):
         return
 
     file_id, file_type, file_name, caption = row
-    bot.send_message(chat_id, "⏳ আপনার ফাইল পাঠানো হচ্ছে...")
+    bot.send_message(chat_id, "⏳ <b>আপনার ফাইল পাঠানো হচ্ছে...</b>", parse_mode="HTML")
 
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
@@ -670,10 +743,217 @@ def send_shared_file_by_code(chat_id, file_code):
     except Exception as e:
         bot.send_message(chat_id, f"❌ ফাইল পাঠাতে সমস্যা হয়েছে: {str(e)[:100]}")
 
-def download_and_send_universal_video(user_id, raw_url):
+def fallback_cobalt_download(user_id, url, status_msg_id=None):
+    cobalt_instances = [
+        "https://api.cobalt.tools/api/json",
+        "https://cobalt-api.kwiatekm.pl/api/json",
+        "https://api.wuk.sh/api/json"
+    ]
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
+    payload = {"url": url}
+    for c_url in cobalt_instances:
+        try:
+            res = requests.post(c_url, json=payload, headers=headers, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                media_url = data.get("url")
+                if media_url:
+                    bot.send_video(
+                        user_id,
+                        media_url,
+                        caption="🎬 <b>Video Downloaded Successfully!</b>\n\n⚡ <i>Fast Cloud Stream</i>\n👨‍💻 Powered by @mrghost_121",
+                        parse_mode="HTML"
+                    )
+                    if status_msg_id:
+                        try:
+                            bot.delete_message(user_id, status_msg_id)
+                        except Exception:
+                            pass
+                    return True
+        except Exception:
+            continue
+    return False
+
+def download_and_send_tiktok(user_id, raw_url):
     if not bot:
         return
-    status_msg = bot.send_message(user_id, "⏳ <b>ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</b>", parse_mode="HTML")
+    status_msg = bot.send_message(user_id, "⏳ <b>TikTok ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
+    url = resolve_url(raw_url)
+
+    # Method 1: TikWM (No Watermark HD)
+    try:
+        r = requests.get(f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}", timeout=15).json()
+        if r.get("code") == 0 and r.get("data"):
+            data = r["data"]
+            video_url = data.get("play") or data.get("wmplay")
+            title = data.get("title") or "TikTok Video"
+            author = (data.get("author") or {}).get("nickname") or "Creator"
+            music = (data.get("music_info") or {}).get("title") or ""
+
+            caption = (
+                "🎵 <b>𝐓𝐈𝐊𝐓𝐎𝐊 𝐕𝐈𝐃𝐄𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 <b>Author:</b> <code>{html.escape(author)}</code>\n"
+                f"📝 <b>Caption:</b>\n<code>{html.escape(title[:250])}</code>\n\n"
+            )
+            if music:
+                caption += f"🎶 <b>Music:</b> <code>{html.escape(music[:80])}</code>\n\n"
+            caption += (
+                "⚡ <i>Downloaded without Watermark in HD</i>\n"
+                '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+            )
+
+            if video_url:
+                v_res = requests.get(video_url, timeout=30, stream=True)
+                if v_res.status_code == 200:
+                    temp_file = f"downloads/tiktok_{user_id}_{int(time.time())}.mp4"
+                    os.makedirs("downloads", exist_ok=True)
+                    with open(temp_file, "wb") as f:
+                        for chunk in v_res.iter_content(chunk_size=1024*1024):
+                            if chunk:
+                                f.write(chunk)
+
+                    if os.path.exists(temp_file):
+                        with open(temp_file, "rb") as vf:
+                            bot.send_video(user_id, vf, caption=caption, parse_mode="HTML", supports_streaming=True)
+                        os.remove(temp_file)
+                        try:
+                            bot.delete_message(user_id, status_msg.message_id)
+                        except Exception:
+                            pass
+                        return
+    except Exception as e:
+        print(f"[!] TikWM error: {e}", flush=True)
+
+    # Method 2: Tiklydown API
+    try:
+        r2 = requests.get(f"https://api.tiklydown.eu.org/api/download?url={urllib.parse.quote(url)}", timeout=15).json()
+        video_url = None
+        title = "TikTok Video"
+        if r2.get("video"):
+            video_url = r2["video"].get("noWatermark") or r2["video"].get("watermark")
+            title = r2.get("title") or title
+        if video_url:
+            bot.send_video(
+                user_id,
+                video_url,
+                caption=f"🎵 <b>TikTok Video Downloaded</b>\n\n📝 <code>{html.escape(title[:180])}</code>\n⚡ <i>No Watermark</i>\n👨‍💻 Powered by @mrghost_121",
+                parse_mode="HTML"
+            )
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        print(f"[!] Tiklydown error: {e}", flush=True)
+
+    # Method 3: Universal Downloader
+    download_and_send_universal_video(user_id, raw_url, status_msg_id=status_msg.message_id)
+
+def download_and_send_instagram(user_id, raw_url):
+    if not bot:
+        return
+    status_msg = bot.send_message(user_id, "⏳ <b>Instagram রিলস/পোস্ট সংগ্রহ ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
+    url = resolve_url(raw_url)
+
+    # Method 1: Public IG API
+    try:
+        api_url = f"https://api.vkrdown.com/web/app/instagram.php?url={urllib.parse.quote(url)}"
+        r = requests.get(api_url, timeout=15).json()
+        data = r.get("data") or {}
+        media_url = data.get("download_url") or data.get("url") or (r.get("media") or [{}])[0].get("url")
+        if media_url:
+            caption = (
+                "📸 <b>𝐈𝐍𝐒𝐓𝐀𝐆𝐑𝐀𝐌 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ <i>HD Quality Video / Photo</i>\n"
+                '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+            )
+            if ".mp4" in media_url or "video" in str(data.get("type", "")).lower():
+                bot.send_video(user_id, media_url, caption=caption, parse_mode="HTML")
+            else:
+                bot.send_photo(user_id, media_url, caption=caption, parse_mode="HTML")
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        print(f"[!] Instagram API fallback: {e}", flush=True)
+
+    # Method 2: Cobalt fallback
+    if fallback_cobalt_download(user_id, url, status_msg.message_id):
+        return
+
+    # Method 3: Universal Downloader
+    download_and_send_universal_video(user_id, raw_url, status_msg_id=status_msg.message_id)
+
+def download_and_send_pinterest(user_id, raw_url):
+    if not bot:
+        return
+    status_msg = bot.send_message(user_id, "⏳ <b>Pinterest মিডিয়া সংগ্রহ করা হচ্ছে...</b>", parse_mode="HTML")
+    url = resolve_url(raw_url)
+
+    caption = (
+        "📌 <b>𝐏𝐈𝐍𝐓𝐄𝐑𝐄𝐒𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ <i>Ultra HD Quality Media</i>\n"
+        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+    )
+
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        html_text = resp.text
+
+        video_match = re.search(r'https://v\.pinimg\.com/videos/[^"\']+\.mp4', html_text) or re.search(r'https://v\.pinimg\.com/[^"\']+\.mp4', html_text)
+        if video_match:
+            v_url = video_match.group(0)
+            bot.send_video(user_id, v_url, caption=caption, parse_mode="HTML")
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+
+        img_match = re.search(r'https://i\.pinimg\.com/originals/[^"\']+\.(?:jpg|png|jpeg|gif)', html_text)
+        if not img_match:
+            img_match = re.search(r'https://i\.pinimg\.com/736x/[^"\']+\.(?:jpg|png|jpeg|gif)', html_text)
+        if img_match:
+            img_url = img_match.group(0)
+            bot.send_photo(user_id, img_url, caption=caption, parse_mode="HTML")
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        print(f"[!] Pinterest direct scraper error: {e}", flush=True)
+
+    # Method 2: Cobalt fallback
+    if fallback_cobalt_download(user_id, url, status_msg.message_id):
+        return
+
+    # Method 3: Universal Downloader
+    download_and_send_universal_video(user_id, raw_url, status_msg_id=status_msg.message_id)
+
+def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
+    if not bot:
+        return
+    if status_msg_id:
+        msg_id = status_msg_id
+    else:
+        status_msg = bot.send_message(user_id, "⏳ <b>ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</b>", parse_mode="HTML")
+        msg_id = status_msg.message_id
+
     target_url = resolve_url(raw_url)
     output_dir = f"downloads/{user_id}_{int(time.time())}"
     os.makedirs(output_dir, exist_ok=True)
@@ -691,14 +971,17 @@ def download_and_send_universal_video(user_id, raw_url):
 
         files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
         if not files:
-            bot.edit_message_text("❌ ভিডিও ডাউনলোড করা সম্ভব হয়নি।", user_id, status_msg.message_id)
+            # Fallback to cobalt
+            if fallback_cobalt_download(user_id, target_url, msg_id):
+                return
+            bot.edit_message_text("❌ ভিডিও ডাউনলোড করা সম্ভব হয়নি।", user_id, msg_id)
             return
 
         file_path = files[0]
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
 
         if file_size_mb > 49.5:
-            bot.edit_message_text("❌ ভিডিও সাইজ ৫০MB-এর বেশি হওয়ায় টেলিগ্রামে সরাসরি পাঠানো সম্ভব নয়।", user_id, status_msg.message_id)
+            bot.edit_message_text("❌ ভিডিও সাইজ ৫০MB-এর বেশি হওয়ায় টেলিগ্রামে সরাসরি পাঠানো সম্ভব নয়।", user_id, msg_id)
         else:
             escaped_title = html.escape(video_title)
             caption_text = (
@@ -710,55 +993,259 @@ def download_and_send_universal_video(user_id, raw_url):
             with open(file_path, 'rb') as vf:
                 bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
             try:
-                bot.delete_message(user_id, status_msg.message_id)
+                bot.delete_message(user_id, msg_id)
             except Exception:
                 pass
 
     except Exception as e:
         err_str = str(e)
         if "tiktok.com" in target_url:
-            if fallback_tiktok_download(user_id, target_url, status_msg.message_id):
-                return
+            download_and_send_tiktok(user_id, target_url)
+            return
+        # Try Cobalt fallback for YouTube / general
+        if fallback_cobalt_download(user_id, target_url, msg_id):
+            return
+
+        if "confirm you're not a bot" in err_str.lower() or "sign in" in err_str.lower():
+            err_msg = (
+                "⚠️ <b>YouTube Bot Detection Error:</b>\n\n"
+                "ইউটিউব বর্তমানে এই ভিডিওর জন্য কুকিজ ভেরিফিকেশন দাবি করছে।\n"
+                "এডমিনকে <code>cookies.txt</code> ফাইল কনফিগার করার অনুরোধ করা হয়েছে।"
+            )
+        else:
+            err_msg = f"⚠️ ডাউনলোড ব্যর্থ হয়েছে: {err_str[:120]}"
+
         try:
-            bot.edit_message_text(f"⚠️ ডাউনলোড ব্যর্থ হয়েছে: {err_str[:120]}", user_id, status_msg.message_id)
+            bot.edit_message_text(err_msg, user_id, msg_id, parse_mode="HTML")
         except Exception:
             pass
     finally:
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir, ignore_errors=True)
 
-def fallback_tiktok_download(user_id, link, status_msg_id=None):
-    apis = [
-        f"https://www.tikwm.com/api/?url={urllib.parse.quote(link)}",
-        f"https://api.tiklydown.eu.org/api/download?url={urllib.parse.quote(link)}"
+# Helper: Number to Info
+def resolve_phone_info(number_text):
+    clean_text = number_text.strip()
+    if not clean_text.startswith("+"):
+        clean_text = "+" + clean_text
+
+    clean_digits = re.sub(r'[^0-9]', '', clean_text)
+
+    res = {
+        "valid": False,
+        "possible": False,
+        "country": "Unknown",
+        "carrier": "Standard Mobile/Telco",
+        "timezone": "Unknown",
+        "type": "Mobile / Telco",
+        "intl_format": clean_text,
+        "nat_format": clean_text,
+        "owner_name": "Not Publicly Indexed",
+        "clean_digits": clean_digits
+    }
+
+    try:
+        parsed = phonenumbers.parse(clean_text, None)
+        res["valid"] = phonenumbers.is_valid_number(parsed)
+        res["possible"] = phonenumbers.is_possible_number(parsed)
+        res["country"] = geocoder.description_for_number(parsed, "en") or "International"
+        res["carrier"] = carrier.name_for_number(parsed, "en") or "Standard Mobile/Telco"
+        tz_list = timezone.time_zones_for_number(parsed)
+        res["timezone"] = ", ".join(tz_list) if tz_list else "Unknown"
+
+        ntype = phonenumbers.number_type(parsed)
+        type_map = {
+            0: "Fixed Line (Landline)",
+            1: "Mobile",
+            2: "Fixed Line or Mobile",
+            3: "Toll-Free",
+            4: "Premium Rate",
+            5: "Shared Cost",
+            6: "VoIP",
+            7: "Personal Number",
+            8: "Pager",
+            9: "UAN",
+            10: "Voicemail"
+        }
+        res["type"] = type_map.get(ntype, "Mobile / Telco")
+        res["intl_format"] = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+        res["nat_format"] = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
+    except Exception as e:
+        print(f"[!] phonenumbers parse error: {e}", flush=True)
+
+    api_keys = [
+        "num_live_mneEFIScOsKerA8d3hXBMPHiF4HkZ3dEFqtIvHFv",
+        "num_live_nTrhy606oIdTtY38in7aAqRgEJNKgKBqwTlhbtEE"
     ]
-    for api_url in apis:
+    for k in api_keys:
         try:
-            r = requests.get(api_url, timeout=12).json()
-            video_url = None
-            title = "TikTok Video"
-            if r.get("data") and r["data"].get("play"):
-                video_url = r["data"]["play"]
-                title = r["data"].get("title") or title
-            elif r.get("video"):
-                video_url = r["video"].get("noWatermark") or r["video"].get("watermark")
-                title = r.get("title") or title
-            if video_url:
-                bot.send_video(
-                    user_id,
-                    video_url,
-                    caption=f"🎵 <b>TikTok Video Downloaded</b>\n\n📌 <code>{html.escape(title[:180])}</code>",
-                    parse_mode="HTML"
-                )
-                if status_msg_id:
-                    try:
-                        bot.delete_message(user_id, status_msg_id)
-                    except Exception:
-                        pass
-                return True
+            r = requests.get(
+                "https://api.numlookupapi.com/v1/validate/" + urllib.parse.quote(clean_text),
+                headers={"apikey": k},
+                timeout=5
+            ).json()
+            if r.get("valid"):
+                fn = r.get("first_name") or ""
+                ln = r.get("last_name") or ""
+                name = (fn + " " + ln).strip()
+                if name:
+                    res["owner_name"] = name
+                if r.get("carrier") and res["carrier"] in ["Unknown", "Standard Mobile/Telco"]:
+                    res["carrier"] = r.get("carrier")
+                if r.get("country_name"):
+                    res["country"] = r.get("country_name")
+                break
         except Exception:
             continue
-    return False
+
+    return res
+
+# Helper: Link Safety Analyzer
+def analyze_link_safety(raw_url):
+    url = raw_url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
+    report = {
+        "url": url,
+        "is_up": False,
+        "status_code": "N/A",
+        "final_url": url,
+        "redirect_count": 0,
+        "redirect_chain": [],
+        "ip": "Unknown",
+        "server": "Unknown",
+        "response_time_ms": 0,
+        "ssl_secure": url.startswith("https://"),
+        "safety_level": "🟢 SAFE",
+        "flags": []
+    }
+
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname or ""
+
+    try:
+        ip = socket.gethostbyname(hostname)
+        report["ip"] = ip
+    except Exception:
+        report["flags"].append("⚠️ Domain DNS IP could not be resolved")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    start_t = time.time()
+    try:
+        res = requests.get(url, headers=headers, timeout=10, allow_redirects=True, stream=True)
+        report["response_time_ms"] = int((time.time() - start_t) * 1000)
+        report["is_up"] = True
+        report["status_code"] = f"{res.status_code} {res.reason}"
+        report["final_url"] = res.url
+        report["server"] = res.headers.get("Server", "Cloudflare / Protected")
+
+        if res.history:
+            report["redirect_count"] = len(res.history)
+            report["redirect_chain"] = [r.url for r in res.history] + [res.url]
+    except requests.exceptions.SSLError:
+        report["flags"].append("❌ Invalid SSL Certificate (Insecure)")
+        report["safety_level"] = "🔴 DANGEROUS"
+    except Exception as e:
+        report["flags"].append(f"❌ Connection Failed: {str(e)[:50]}")
+        report["safety_level"] = "🔴 UNREACHABLE"
+        return report
+
+    suspicious_tlds = [".xyz", ".top", ".buzz", ".fit", ".tk", ".ml", ".ga", ".cf", ".gq", ".work", ".click", ".surf", ".rest"]
+    phishing_keywords = ["login", "signin", "verify", "secure", "update", "bank", "account-check", "free-gift", "giveaway", "free-claim"]
+
+    final_host = urllib.parse.urlparse(report["final_url"]).hostname or ""
+
+    if re.match(r'^\d+\.\d+\.\d+\.\d+$', final_host):
+        report["flags"].append("⚠️ Uses raw IP address as host (Phishing Risk)")
+        report["safety_level"] = "🟡 SUSPICIOUS"
+
+    for tld in suspicious_tlds:
+        if final_host.endswith(tld):
+            report["flags"].append(f"⚠️ High-risk TLD ({tld})")
+            report["safety_level"] = "🟡 SUSPICIOUS"
+            break
+
+    for kw in phishing_keywords:
+        if kw in report["final_url"].lower():
+            report["flags"].append(f"⚠️ Contains sensitive keyword: '{kw}'")
+            if report["safety_level"] != "🔴 DANGEROUS":
+                report["safety_level"] = "🟡 SUSPICIOUS"
+            break
+
+    if report["redirect_count"] >= 3:
+        report["flags"].append(f"⚠️ High number of redirects ({report['redirect_count']} hops)")
+
+    if not report["final_url"].startswith("https://"):
+        report["flags"].append("⚠️ Insecure connection (HTTP without SSL)")
+        if report["safety_level"] == "🟢 SAFE":
+            report["safety_level"] = "🟡 UNENCRYPTED"
+
+    if not report["flags"]:
+        report["flags"].append("✅ No known security threats detected")
+
+    return report
+
+# Helper: Encode / Decode
+def run_encode_decode(op_code, text):
+    try:
+        if op_code == "op_enc_b64":
+            return base64.b64encode(text.encode('utf-8')).decode('utf-8')
+        elif op_code == "op_dec_b64":
+            return base64.b64decode(text.encode('utf-8')).decode('utf-8', errors='replace')
+        elif op_code == "op_enc_url":
+            return urllib.parse.quote(text)
+        elif op_code == "op_dec_url":
+            return urllib.parse.unquote(text)
+        elif op_code == "op_enc_hex":
+            return text.encode('utf-8').hex()
+        elif op_code == "op_dec_hex":
+            clean_hex = text.strip().replace(" ", "").replace("0x", "")
+            return bytes.fromhex(clean_hex).decode('utf-8', errors='replace')
+        elif op_code == "op_enc_bin":
+            return ' '.join(format(ord(c), '08b') for c in text)
+        elif op_code == "op_dec_bin":
+            clean_bin = [b for b in text.strip().split() if len(b) == 8]
+            return ''.join(chr(int(b, 2)) for b in clean_bin)
+        elif op_code == "op_enc_rot13":
+            return codecs.encode(text, 'rot_13')
+        elif op_code == "op_text_rev":
+            return text[::-1]
+    except Exception as e:
+        return f"Conversion Error: {e}"
+    return "Unknown operation"
+
+# Helper: ImgBB Upload
+def upload_image_to_imgbb(file_bytes):
+    api_key = os.getenv("IMGBB_API_KEY", "").strip() or IMGBB_API_KEY
+    if not api_key:
+        return {"success": False, "error": "IMGBB_API_KEY is not configured in environment variables!"}
+
+    b64_image = base64.b64encode(file_bytes).decode('utf-8')
+    try:
+        res = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": api_key,
+                "image": b64_image
+            },
+            timeout=30
+        ).json()
+        if res.get("success") and res.get("data"):
+            return {
+                "success": True,
+                "url": res["data"].get("url"),
+                "display_url": res["data"].get("display_url"),
+                "delete_url": res["data"].get("delete_url"),
+                "size": round(res["data"].get("size", 0) / 1024, 2)
+            }
+        else:
+            err = (res.get("error") or {}).get("message") or "Upload failed"
+            return {"success": False, "error": err}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ==========================================
@@ -800,18 +1287,32 @@ if bot:
             send_join_prompt(message.chat.id, "verify_home")
             return
 
+        # 1. Send Start Photo First (Protected content based on Admin setting, not forwarded)
+        if os.path.exists(START_PHOTO_PATH):
+            try:
+                protect = is_photo_protection_enabled()
+                with open(START_PHOTO_PATH, 'rb') as pf:
+                    bot.send_photo(message.chat.id, pf, protect_content=protect)
+            except Exception as e:
+                print(f"[!] Start photo send error: {e}", flush=True)
+
+        # 2. Send Stylish Welcome Message
         welcome_text = (
-            "👋 <b>WELCOME TO MR GHOST BOT!</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
+            "👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 𝐔𝐓𝐈𝐋𝐈𝐓𝐘 𝐁𝐎𝐓!</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             "🌐 আমাদের বটটি একটি <b>100% Free Public Utility & Video Downloader Bot</b>।\n"
-            "কোনো কয়েন ছাড়াই সকল টুলস এবং ডাউনলোডার আনলিমিটেড ব্যবহার করতে পারবেন!\n\n"
-            "✨ <b>ডিরেক্ট ভিডিও ডাউনলোডার:</b>\n"
-            "যেকোনো ভিডিওর (YouTube, Facebook, TikTok, Instagram) লিংক সরাসরি চ্যাটে পাঠালেই বট অটোমেটিক ডাউনলোড করে দেবে।\n\n"
-            "⚠️ <b>IMPORTANT NOTICE | গুরুত্বপূর্ণ সতর্কবার্তা</b>\n"
-            "✅ বটটি বৈধ ও দায়িত্বশীল কাজে ব্যবহার করুন।\n"
-            "❌ প্রতারণা, স্প্যাম বা অন্যের ক্ষতি হয় এমন কাজে বট ব্যবহার করবেন না।\n\n"
-            "🛡️ <b>USE RESPONSIBLY • STAY SAFE</b>\n"
-            "👨‍💻 Powered by <b>Mr Ghost</b> (@mrghost_121)"
+            "কোনো লিমিট বা চার্জ ছাড়াই সকল টুলস এবং ডাউনলোডার আনলিমিটেড ব্যবহার করুন!\n\n"
+            "⚡ <b>অটোমেটিক ভিডিও ডাউনলোডার:</b>\n"
+            "যেকোনো ভিডিও লিংক (YouTube, Facebook, TikTok, Instagram, Pinterest) সরাসরি চ্যাটে পেস্ট করলেই বট স্বয়ংক্রিয়ভাবে ডাউনলোড করে দেবে।\n\n"
+            "✨ <b>জনপ্রিয় ফিচারসমূহ:</b>\n"
+            "• 🎬 Universal Downloader (YT, FB, TikTok, Insta, Pin)\n"
+            "• 🖼️ Image to Direct Link (ImgBB Hosting)\n"
+            "• 📺 Live TV Streaming Hub\n"
+            "• 🔐 Encode & Decode Suite (Base64, URL, Hex, Binary)\n"
+            "• 🛡️ Real-time Link & Phishing Checker\n"
+            "• 📞 Phone Number to Information Lookup\n\n"
+            "⚠️ <b>জরুরী নোটিশ:</b> বটটি সম্পূর্ণ বৈধ ও গঠনমূলক কাজে ব্যবহার করুন।\n"
+            "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
         )
         bot.send_message(
             message.chat.id,
@@ -823,24 +1324,26 @@ if bot:
     @bot.message_handler(commands=['help', 'about'])
     def handle_help(message):
         help_text = (
-            "🛡️ <b>MR GHOST — Cyber Security & Utility Bot</b>\n\n"
+            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 & 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             "<b>Available Free Tools:</b>\n"
-            "• Universal Video Downloader (YT, FB, TikTok, IG)\n"
-            "• File Sharing & Cloud Link Generator\n"
-            "• YouTube Thumbnail & Title/Tags Extractor\n"
-            "• TikTok Video & Title Extractor\n"
-            "• Phone Number to Info & IP Location Tracker\n"
-            "• Direct WhatsApp Chat Opener\n"
-            "• QR Code Generator & CC/BIN Generator\n"
-            "• Background Remover, Encode/Decode & Link Checker\n"
-            "• NID / Aadhaar & Cyber Tutorials Hub\n\n"
-            "<b>Commands:</b>\n"
+            "• 📥 Universal Video Downloader (YT, FB, TikTok, IG, Pinterest)\n"
+            "• 🖼️ Image to Link (ImgBB Direct Hosting)\n"
+            "• 📺 Live TV Streaming Player\n"
+            "• 📂 File Sharing & Cloud Link Generator\n"
+            "• 🖼️ YouTube Thumbnail & Title/Tags Extractor\n"
+            "• 🎵 TikTok Video & Title Extractor (No Watermark)\n"
+            "• 📞 Phone Number to Info & IP Location Tracker\n"
+            "• 💫 Direct WhatsApp Chat Opener\n"
+            "• 🔳 QR Code Generator & CC/BIN Generator\n"
+            "• 🔐 Built-in Encode/Decode & Link Security Checker\n"
+            "• 🆔 BD NID & Aadhaar Resources\n\n"
+            "<b>Bot Commands:</b>\n"
             "/start - Start or restart the bot\n"
-            "/help - Show this help menu\n"
-            "/banlist - View banned users\n"
-            "/admin - Admin Control Panel\n\n"
-            "<b>Channel Rule:</b>\n"
-            "আমাদের অফিসিয়াল চ্যানেলে (@mrghost_121) অবশ্যই Join থাকতে হবে।"
+            "/help - View this help menu\n"
+            "/ad - Admin Control Panel (Admins Only)\n\n"
+            "<b>Channel Requirement:</b>\n"
+            "আমাদের অফিসিয়াল চ্যানেলে (@mrghost_121) যুক্ত থাকতে হবে।"
         )
         markup = types.InlineKeyboardMarkup()
         markup.add(
@@ -855,7 +1358,7 @@ if bot:
         if not rows:
             bot.reply_to(message, "✅ No banned users.")
             return
-        txt = "☠️ <b>Channel Rule Break / Banned List:</b>\n\n"
+        txt = "☠️ <b>Banned Users List:</b>\n\n"
         for idx, (uid, fname) in enumerate(rows, 1):
             txt += f"{idx}. <code>{uid}</code> → <a href='tg://user?id={uid}'>{html.escape(fname or 'User')}</a>\n"
         bot.reply_to(message, txt, parse_mode="HTML")
@@ -889,19 +1392,76 @@ if bot:
             return
         clear_state(message.from_user.id)
         maint = is_maintenance()
+        protect = is_photo_protection_enabled()
+        has_cookie = os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0
         txt = (
-            "⚙️ <b>ADMIN CONTROL PANEL</b>\n\n"
-            f"🔧 <b>Maintenance Status:</b> {'🟢 ON' if maint else '🔴 OFF'}\n"
+            "⚙️ <b>𝐀𝐃𝐌𝐈𝐍 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 𝐏𝐀𝐍𝐄𝐋</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+            f"🔧 <b>Maintenance Mode:</b> {'🟢 ON' if maint else '🔴 OFF'}\n"
+            f"🔒 <b>Start Photo Download Protect:</b> {'🟢 ON (Protected)' if protect else '🔴 OFF (Downloadable)'}\n"
+            f"🍪 <b>YouTube Cookies:</b> {'🟢 Active (cookies.txt)' if has_cookie else '🔴 Not Uploaded'}\n"
             f"👥 <b>Total Users:</b> <code>{len(get_all_user_ids())}</code>\n"
             f"💳 <b>Card Stock:</b> <code>{count_cards_db()}</code>"
         )
         bot.send_message(message.chat.id, txt, parse_mode="HTML", reply_markup=get_admin_keyboard())
 
     # ==========================================
-    # 7. FILE UPLOAD HANDLER (DOCUMENT / VIDEO / PHOTO)
+    # 7. MEDIA UPLOAD HANDLER
     # ==========================================
     @bot.message_handler(content_types=['document', 'video', 'photo'])
     def handle_media_upload(message):
+        user_id = message.from_user.id
+        state = get_state(user_id)
+
+        # Admin uploading cookies.txt
+        if user_id in ADMIN_IDS and message.document and (state == "admin_upload_cookie" or message.document.file_name == "cookies.txt"):
+            clear_state(user_id)
+            try:
+                file_info = bot.get_file(message.document.file_id)
+                downloaded = bot.download_file(file_info.file_path)
+                with open("cookies.txt", "wb") as f:
+                    f.write(downloaded)
+                bot.reply_to(message, "✅ <b>cookies.txt সফলভাবে আপডেট করা হয়েছে!</b>\nএখন ইউটিউব ডাউনলোড কুকিজ সক্রিয় থাকবে।", parse_mode="HTML")
+            except Exception as e:
+                bot.reply_to(message, f"❌ কুকিজ ফাইল সেভ করতে ব্যর্থ: {e}")
+            return
+
+        # Image to Link State
+        if state == "awaiting_imgbb_photo" and message.photo:
+            clear_state(user_id)
+            wait_m = bot.send_message(message.chat.id, "⏳ <b>ImgBB সার্ভারে ছবি আপলোড করা হচ্ছে...</b>", parse_mode="HTML")
+            try:
+                file_info = bot.get_file(message.photo[-1].file_id)
+                file_bytes = bot.download_file(file_info.file_path)
+                res = upload_image_to_imgbb(file_bytes)
+                if res.get("success"):
+                    direct_url = res["url"]
+                    display_url = res["display_url"]
+                    delete_url = res["delete_url"]
+                    size_kb = res["size"]
+
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(types.InlineKeyboardButton("🌐 Open Direct Image", url=direct_url))
+
+                    out_txt = (
+                        "✅ <b>𝐈𝐌𝐀𝐆𝐄 𝐔𝐏𝐋𝐎𝐀𝐃𝐄𝐃 𝐒𝐔𝐂𝐂𝐄𝐒𝐒𝐅𝐔𝐋𝐋𝐘!</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"🔗 <b>Direct Link (ক্লিক করলেই কপি হবে):</b>\n"
+                        f"<code>{direct_url}</code>\n\n"
+                        f"👁️ <b>Viewer URL:</b>\n"
+                        f"<code>{display_url}</code>\n\n"
+                        f"📦 <b>File Size:</b> {size_kb} KB\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        "⚡ <i>Hosted permanently on ImgBB</i>\n"
+                        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                    )
+                    bot.edit_message_text(out_txt, message.chat.id, wait_m.message_id, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=False)
+                else:
+                    bot.edit_message_text(f"❌ <b>আপলোড ব্যর্থ হয়েছে:</b> {res.get('error')}", message.chat.id, wait_m.message_id, parse_mode="HTML")
+            except Exception as e:
+                bot.edit_message_text(f"❌ ছবি প্রসেস করতে সমস্যা হয়েছে: {e}", message.chat.id, wait_m.message_id)
+            return
+
         if not verify_user_access(message, "verify_upload"):
             return
 
@@ -992,21 +1552,38 @@ if bot:
             )
             return
 
-        tutorial_links = {
-            "tut_bot": ("🤖 BOT Create", "https://youtu.be/Ws6N7RNv1Eg"),
-            "tut_file": ("📂 File Share Bot Make", "https://youtu.be/xvqdMxIHVIM?si=GMFuUcFvfBtkvkOb"),
-            "tut_aitrend": ("🤖 AI Trend", "https://youtu.be/kTWoiAhXMv0?si=qtENai2-PPd-gpUV"),
-            "tut_follower": ("📈 Unlimited Follower", "https://youtu.be/JfFPO9GfI8A?si=5OujH-7Z8koavma3"),
-            "tut_cyber": ("🌐 Cyber Website Make", "https://youtu.be/Cqy6CWkp2do?si=c9mRN5qxVyXh-qfJ"),
-            "tut_vpn": ("🎮 VPN / Game Crack", "https://youtu.be/Nx1rmTSJ0Q8"),
-            "tut_chatgpt": ("💎 ChatGPT Plus", "https://youtu.be/WhiBrtwqDPY"),
-            "tut_hosting": ("🔥 Free Hosting + Giveaway", "https://youtu.be/3h_NiJoqx2E?si=thMaPm6M0aUcuqaB"),
-        }
-        if data in tutorial_links:
+        # Encode / Decode Callbacks
+        if data.startswith("op_"):
             bot.answer_callback_query(call.id)
-            title, link = tutorial_links[data]
-            notify_admin_log(call.from_user, f"Tutorial: {title}")
-            bot.send_message(chat_id, f"🎬 <b>{title} Tutorial:</b>\n\n👉 {link}", parse_mode="HTML")
+            op_titles = {
+                "op_enc_b64": "Base64 Encode",
+                "op_dec_b64": "Base64 Decode",
+                "op_enc_url": "URL Encode",
+                "op_dec_url": "URL Decode",
+                "op_enc_hex": "Hex Encode",
+                "op_dec_hex": "Hex Decode",
+                "op_enc_bin": "Binary Encode",
+                "op_dec_bin": "Binary Decode",
+                "op_enc_rot13": "ROT13 Cipher",
+                "op_text_rev": "Reverse Text"
+            }
+            title = op_titles.get(data, "Encode/Decode")
+            set_state(user_id, f"run_op|{data}")
+            bot.send_message(
+                chat_id,
+                f"📝 <b>Selected: {title}</b>\n\nযে টেক্সটটিকে কনভার্ট করতে চান তা নিচে লিখে পাঠান 👇",
+                parse_mode="HTML"
+            )
+            return
+
+        if data == "open_enc_menu":
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                chat_id,
+                "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nনিচের অপশন থেকে সিলেক্ট করুন 👇",
+                parse_mode="HTML",
+                reply_markup=get_encode_decode_keyboard()
+            )
             return
 
     # ==========================================
@@ -1023,6 +1600,7 @@ if bot:
             handle_start(message)
             return
 
+        # Admin Actions
         if user.id in ADMIN_IDS:
             if text in ["⚙️ Admin Panel", "🔙 Back to Admin"]:
                 clear_state(user.id)
@@ -1035,6 +1613,24 @@ if bot:
             elif text == "🔴 Maintenance OFF":
                 set_maintenance(False)
                 bot.send_message(chat_id, "✅ Maintenance Mode turned OFF!", reply_markup=get_admin_keyboard())
+                return
+            elif text == "🔒 Photo Protect: ON":
+                set_photo_protection(False)
+                bot.send_message(chat_id, "🔓 Start Photo Download Protection turned OFF! (ইউজাররা এখন ছবি ডাউনলোড করতে পারবে)", reply_markup=get_admin_keyboard())
+                return
+            elif text == "🔓 Photo Protect: OFF":
+                set_photo_protection(True)
+                bot.send_message(chat_id, "🔒 Start Photo Download Protection turned ON! (ছবি ডাউনলোড ও ফরওয়ার্ড বন্ধ করা হয়েছে)", reply_markup=get_admin_keyboard())
+                return
+            elif text in ["🍪 Upload Cookie", "🍪 Cookie: ACTIVE"]:
+                set_state(user.id, "admin_upload_cookie")
+                bot.send_message(
+                    chat_id,
+                    "🍪 <b>YouTube Cookie Management:</b>\n\n"
+                    "আপনার <code>cookies.txt</code> ফাইলটি সরাসরি এখানে ডকুমেন্ট আকারে পাঠান অথবা কুকিজের টেক্সট পেস্ট করুন:\n"
+                    "(বাতিল করতে 🏠 Home চাপুন)",
+                    parse_mode="HTML"
+                )
                 return
             elif text == "👥 Total Users":
                 total_u, _, total_f = get_user_stats(user.id)
@@ -1081,12 +1677,14 @@ if bot:
         menu_buttons = {
             "📂 File Sharing Bot", "📤 Upload File", "📊 Stats", "ℹ️ Help",
             "🎥 YouTube Downloader", "📹 Facebook Download", "🎵 TikTok Download",
+            "📸 Instagram Download", "📌 Pinterest Download",
             "🖼️ Thumbnail Downloader", "📝 Yt Title Tags Extract", "📝 TikTok Title Extract",
-            "📞 Number to Info", "🔳 Qr Maker", "🖼️ Background Remover",
-            "🔐 Encode & Decode", "🛡️ Link Checker", "📊 YouTube Watchtime",
+            "🖼️ Image to Link", "📺 Live TV",
+            "📞 Number to Info", "🔳 Qr Maker",
+            "🔐 Encode & Decode", "🛡️ Link Checker",
             "🌍 IP Tracker", "💫 Whatsapp Opener", "🪪 Visa / Master Card Maker",
             "💳 CC Generator", "💳 Get Free Card", "🆔 BD NID Tools",
-            "🪪 Aadhaar Tools", "⚠️ SMS BOMBER", "😫 Google Photos", "🎓 Tutorials Hub"
+            "🪪 Aadhaar Tools", "⚠️ SMS BOMBER"
         }
 
         if text in menu_buttons:
@@ -1094,8 +1692,8 @@ if bot:
 
             if text == "📂 File Sharing Bot":
                 panel_txt = (
-                    "📂 <b>FILE SHARING SYSTEM — MR GHOST</b>\n"
-                    "━━━━━━━━━━━━━━━━━━\n\n"
+                    "📂 <b>𝐅𝐈𝐋𝐄 𝐒𝐇𝐀𝐑𝐈𝐍𝐆 𝐒𝐘𝐒𝐓𝐄𝐌 — 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
                     "⚡ এখানে আপনি যেকোনো Document, Photo বা Video আপলোড করে শেয়ার লিংক বানাতে পারবেন (১০০% ফ্রি)।\n\n"
                     "👇 নিচের বাটন থেকে নির্বাচন করুন অথবা সরাসরি ফাইল পাঠান:"
                 )
@@ -1112,19 +1710,19 @@ if bot:
                 return
 
             elif text == "📊 Stats":
-                total_u, user_up, total_f = get_user_stats(user.id)
+                _, user_up, total_f = get_user_stats(user.id)
                 stats_msg = (
-                    "📊 <b>MR GHOST BOT — পরিসংখ্যান</b>\n"
-                    "━━━━━━━━━━━━━━━━━━\n\n"
+                    "📊 <b>𝐔𝐒𝐄𝐑 𝐀𝐂𝐂𝐎𝐔𝐍𝐓 𝐒𝐓𝐀𝐓𝐈𝐒𝐓𝐈𝐂𝐒</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
                     "👤 <b>ব্যবহারকারীর তথ্য:</b>\n"
-                    f"• নাম: {html.escape(user.first_name or 'User')}\n"
+                    f"• নাম: <b>{html.escape(user.first_name or 'User')}</b>\n"
                     f"• আইডি: <code>{user.id}</code>\n"
                     f"• ইউজারনেম: @{user.username or 'N/A'}\n\n"
-                    "📈 <b>অ্যাক্টিভিটি:</b>\n"
-                    "• অ্যাকাউন্ট স্ট্যাটাস: <b>Free Unlimited</b> ⚡\n"
-                    f"• আপনার মোট ফাইল আপলোড: <b>{user_up}</b> টি\n"
-                    f"• বটের মোট ব্যবহারকারী: <b>{total_u}</b> জন\n\n"
-                    "👨‍💻 <b>Powered by Mr Ghost</b>"
+                    "📈 <b>অ্যাক্টিভিটি ও স্ট্যাটাস:</b>\n"
+                    "• সাবস্ক্রিপশন: <b>Free Lifetime Access ⚡</b>\n"
+                    f"• আপনার আপলোডকৃত ফাইল: <b>{user_up}</b> টি\n"
+                    "• ক্লাউড স্টোরেজ: <b>Unlimited Storage</b>\n\n"
+                    "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
                 )
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
@@ -1145,19 +1743,36 @@ if bot:
             elif text == "📹 Facebook Download":
                 notify_admin_log(user, "Facebook Downloader")
                 set_state(user.id, "awaiting_video_url")
-                bot.send_message(chat_id, "📥 <b>Facebook Video & Reels Downloader</b>\n\nআপনার ফেসবুক ভিডিও বা রিলস (Reel) লিংকটি পাঠান 👇", parse_mode="HTML")
+                bot.send_message(chat_id, "📹 <b>Facebook Video & Reels Downloader</b>\n\nআপনার ফেসবুক ভিডিও বা রিলস (Reels) লিংকটি পাঠান 👇", parse_mode="HTML")
                 return
 
             elif text == "🎵 TikTok Download":
                 notify_admin_log(user, "TikTok Downloader")
-                set_state(user.id, "awaiting_video_url")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🌐 Open TikTok Downloader Web", url="https://mrghost.ct.ws/tiktok.html"))
+                set_state(user.id, "awaiting_tiktok_url")
                 bot.send_message(
                     chat_id,
-                    "🎵 <b>TikTok Video Downloader (No Watermark)</b>\n\nসরাসরি চ্যাটে TikTok ভিডিওর লিংক পাঠান অথবা নিচের ওয়েব টুল ব্যবহার করুন 👇",
-                    parse_mode="HTML",
-                    reply_markup=markup
+                    "🎵 <b>TikTok Video Downloader (No Watermark)</b>\n\nসরাসরি চ্যাটে আপনার কাঙ্ক্ষিত TikTok ভিডিওর লিংক পাঠান 👇",
+                    parse_mode="HTML"
+                )
+                return
+
+            elif text == "📸 Instagram Download":
+                notify_admin_log(user, "Instagram Downloader")
+                set_state(user.id, "awaiting_insta_url")
+                bot.send_message(
+                    chat_id,
+                    "📸 <b>Instagram Video & Reels Downloader</b>\n\nআপনার ইনস্টাগ্রাম রিলস, ভিডিও বা পোস্টের লিংক পাঠান 👇",
+                    parse_mode="HTML"
+                )
+                return
+
+            elif text == "📌 Pinterest Download":
+                notify_admin_log(user, "Pinterest Downloader")
+                set_state(user.id, "awaiting_pin_url")
+                bot.send_message(
+                    chat_id,
+                    "📌 <b>Pinterest Video & Image Downloader</b>\n\nআপনার Pinterest পিন বা ভিডিওর লিংক পাঠান 👇",
+                    parse_mode="HTML"
                 )
                 return
 
@@ -1169,6 +1784,39 @@ if bot:
                     "🖼️ <b>YouTube Thumbnail Downloader</b>\n\nদয়া করে আপনার কাঙ্ক্ষিত ইউটিউব ভিডিওর লিংকটি এখানে পাঠান:\n<i>উদাহরণ: https://youtu.be/xxxxxx</i>",
                     parse_mode="HTML"
                 )
+                return
+
+            elif text == "🖼️ Image to Link":
+                notify_admin_log(user, "Image to Link")
+                set_state(user.id, "awaiting_imgbb_photo")
+                bot.send_message(
+                    chat_id,
+                    "🖼️ <b>𝐈𝐌𝐀𝐆𝐄 𝐓𝐎 𝐔𝐑𝐋 𝐇𝐎𝐒𝐓𝐈𝐍𝐆 (𝐈𝐦𝐠𝐁𝐁)</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "📸 <b>আপনার ছবিটি এখানে পাঠান (Photo হিসেবে):</b>\n\n"
+                    "⚡ বট সরাসরি ImgBB সার্ভারে আপলোড করে আপনাকে পার্মানেন্ট <b>Direct Image Link</b> বানিয়ে দেবে।\n"
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
+                return
+
+            elif text == "📺 Live TV":
+                notify_admin_log(user, "Live TV")
+                tv_text = (
+                    "📺 <b>𝐋𝐈𝐕𝐄 𝐓𝐕 𝐒𝐓𝐑𝐄𝐀𝐌𝐈𝐍𝐆 𝐇𝐔𝐁</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🌐 <b>অনলাইন লাইভ টিভি লিংক:</b>\n"
+                    "👉 https://mboxofficial.vercel.app/\n\n"
+                    "⚠️ <b>দৃষ্টি আকর্ষণ / জরুরী নোটিশ:</b>\n"
+                    "এই লিংকটি অনলাইনে সরাসরি যেকোনো ব্রাউজারে ব্যবহার করা যায়, তবে অ্যাপ ছাড়া অনেকগুলো টিভি চ্যানেল কাজ নাও করতে পারে। তাই নিরবচ্ছিন্ন বিনোদনের জন্য তাদের অফিসিয়াল <b>App ব্যবহার করুন</b>।\n"
+                    "━━━━━━━━━━━━━━━━━━━━"
+                )
+                markup = types.InlineKeyboardMarkup()
+                markup.add(
+                    types.InlineKeyboardButton("🌐 Open Live TV", url="https://mboxofficial.vercel.app/"),
+                    types.InlineKeyboardButton("📢 Official Channel", url=CHANNEL_URL)
+                )
+                bot.send_message(chat_id, tv_text, parse_mode="HTML", reply_markup=markup)
                 return
 
             elif text == "📝 Yt Title Tags Extract":
@@ -1207,34 +1855,42 @@ if bot:
                 bot.send_message(chat_id, "🔳 <b>QR Code Maker</b>\n\nQR Code বানাতে নিচে যেকোনো Text বা Link পাঠান 👇", parse_mode="HTML")
                 return
 
-            elif text == "🖼️ Background Remover":
-                notify_admin_log(user, "Background Remover")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🌐 Open Background Remover", url="https://mboxofficial.vercel.app/"))
-                markup.add(types.InlineKeyboardButton("✨ Alternative Mirror", url="https://itsmuttakin.pages.dev/bgremove"))
-                bot.send_message(chat_id, "👇 <b>Click the button below to remove image background instantly:</b>", parse_mode="HTML", reply_markup=markup)
-                return
-
             elif text == "🔐 Encode & Decode":
                 notify_admin_log(user, "Encode & Decode Tool")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🔐 Open Encode Tool", url="https://itsmuttakin.pages.dev/encode"))
-                markup.add(types.InlineKeyboardButton("🌐 Mirror 2", url="https://mrghost.ct.ws/encode.html"))
-                bot.send_message(chat_id, "⬇️ <b>Click the button below to use the Encode & Decode Tool instantly:</b>", parse_mode="HTML", reply_markup=markup)
+                bot.send_message(
+                    chat_id,
+                    "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (১০০% ইন-বট)</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "নিচের যেকোনো অ্যালগরিদম বেছে নিন:\n"
+                    "• Base64 Encode / Decode\n"
+                    "• URL Encode / Decode\n"
+                    "• Hex (Hexadecimal) Encode / Decode\n"
+                    "• Binary (0101) Encode / Decode\n"
+                    "• ROT13 Cipher & Text Reverse\n\n"
+                    "👇 <b>নিচের মেনু থেকে আপনার পছন্দ সিলেক্ট করুন:</b>",
+                    parse_mode="HTML",
+                    reply_markup=get_encode_decode_keyboard()
+                )
                 return
 
             elif text == "🛡️ Link Checker":
                 notify_admin_log(user, "Link Checker Tool")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🔗 Open Link Checker Tool", url="https://itsmuttakin.pages.dev/linkchek"))
-                bot.send_message(chat_id, "⬇️ <b>Click the button below to check your link safely:</b>", parse_mode="HTML", reply_markup=markup)
-                return
-
-            elif text == "📊 YouTube Watchtime":
-                notify_admin_log(user, "YouTube Watchtime Tool")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("⏱️ Open Watch Time Tool", url="https://itsmuttakin.pages.dev/wachtime"))
-                bot.send_message(chat_id, "⬇️ <b>Click the button below to access the YouTube Watch Time Tool:</b>", parse_mode="HTML", reply_markup=markup)
+                set_state(user.id, "awaiting_link_check")
+                bot.send_message(
+                    chat_id,
+                    "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 & 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🔍 <b>যেকোনো URL বা লিংক এখানে পাঠান:</b>\n"
+                    "বট পরীক্ষা করবে:\n"
+                    "• লিংকটি সচল ও নিরাপদ কিনা\n"
+                    "• আসল ডেস্টিনেশন URL (Unshorten Link)\n"
+                    "• রিডাইরেক্ট চেইন (Redirect Chain)\n"
+                    "• আইপি ও সার্ভার ইনফরমেশন\n"
+                    "• ফিশিং বা ক্ষতিকারক TLD ওয়ার্নিং\n\n"
+                    "👇 <b>এখন লিংকটি লিখে বা পেস্ট করে পাঠান:</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
                 return
 
             elif text == "🌍 IP Tracker":
@@ -1318,42 +1974,19 @@ if bot:
                 )
                 return
 
-            elif text == "😫 Google Photos":
-                notify_admin_log(user, "Google Photos Unlimited")
-                bot.send_message(
-                    chat_id,
-                    "😫 <b>Google Photos Unlimited Backup:</b>\n\n👉 https://youtu.be/P2KV2fradZs?si=Q1H-zXt0SXZyuQ6_\n🔒 <i>The File Is Password Protected (Password In This Video)</i>",
-                    parse_mode="HTML"
-                )
-                return
-
-            elif text == "🎓 Tutorials Hub":
-                notify_admin_log(user, "Tutorials Hub")
-                markup = types.InlineKeyboardMarkup(row_width=1)
-                markup.add(
-                    types.InlineKeyboardButton("🤖 BOT Create", callback_data="tut_bot"),
-                    types.InlineKeyboardButton("📂 File Share Bot Make", callback_data="tut_file"),
-                    types.InlineKeyboardButton("🤖 AI Trend", callback_data="tut_aitrend"),
-                    types.InlineKeyboardButton("📈 Unlimited Follower", callback_data="tut_follower"),
-                    types.InlineKeyboardButton("🌐 Cyber Website Make", callback_data="tut_cyber"),
-                    types.InlineKeyboardButton("🎮 VPN / Game Crack", callback_data="tut_vpn"),
-                    types.InlineKeyboardButton("💎 ChatGPT Plus", callback_data="tut_chatgpt"),
-                    types.InlineKeyboardButton("🔥 Free Hosting + Giveaway", callback_data="tut_hosting")
-                )
-                bot.send_message(
-                    chat_id,
-                    "🎓 <b>Welcome to Tutorials Hub!</b>\n📚 এখানে সব প্রিমিয়াম টিউটোরিয়াল ভিডিও ফ্রিতে পাবা 👇",
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-                return
-
         # ==========================================
         # 10. STATE-BASED INPUT PROCESSING
         # ==========================================
         state = get_state(user.id)
 
-        if state == "admin_broadcast" and user.id in ADMIN_IDS:
+        if state == "admin_upload_cookie" and user.id in ADMIN_IDS:
+            clear_state(user.id)
+            with open("cookies.txt", "w", encoding="utf-8") as f:
+                f.write(text)
+            bot.send_message(chat_id, "✅ <b>cookies.txt সফলভাবে সেভ করা হয়েছে!</b>", parse_mode="HTML")
+            return
+
+        elif state == "admin_broadcast" and user.id in ADMIN_IDS:
             clear_state(user.id)
             all_users = get_all_user_ids()
             sent_count = 0
@@ -1396,7 +2029,72 @@ if bot:
                 bot.send_message(chat_id, "❌ সঠিক সংখ্যাবাচক User ID দিন।")
             return
 
-        if state == "awaiting_yt_thumb":
+        # Encode / Decode State Execution
+        if state and state.startswith("run_op|"):
+            op_code = state.split("|", 1)[1]
+            clear_state(user.id)
+            result = run_encode_decode(op_code, text)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔄 Another Operation", callback_data="open_enc_menu"))
+
+            resp_txt = (
+                "🎯 <b>𝐄𝐍𝐂𝐎𝐃𝐄 / 𝐃𝐄𝐂𝐎𝐃𝐄 𝐑𝐄𝐒𝐔𝐋𝐓:</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<pre>{html.escape(result)}</pre>\n\n"
+                "👆 <i>ক্লিক করলেই সম্পূর্ণ ফলাফল একসাথে কপি হয়ে যাবে।</i>"
+            )
+            bot.send_message(chat_id, resp_txt, parse_mode="HTML", reply_markup=markup)
+            return
+
+        # Link Checker State
+        if state == "awaiting_link_check":
+            clear_state(user.id)
+            wait_m = bot.send_message(chat_id, "⏳ <b>লিংকটি স্ক্যান ও পরীক্ষা করা হচ্ছে...</b>", parse_mode="HTML")
+            rep = analyze_link_safety(text)
+
+            flags_txt = "\n".join([f"• {f}" for f in rep["flags"]])
+            redirect_txt = "None (Direct)"
+            if rep["redirect_chain"]:
+                redirect_txt = f"{rep['redirect_count']} Hops:\n" + "\n".join([f"→ <code>{html.escape(u)}</code>" for u in rep["redirect_chain"][:4]])
+
+            out_msg = (
+                "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 𝐀𝐍𝐀𝐋𝐘𝐒𝐈𝐒 𝐑𝐄𝐏𝐎𝐑𝐓</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🎯 <b>Status:</b> <b>{rep['status_code']}</b>\n"
+                f"🛡️ <b>Safety Level:</b> <b>{rep['safety_level']}</b>\n"
+                f"⏱️ <b>Response Time:</b> {rep['response_time_ms']} ms\n"
+                f"🌐 <b>Target IP:</b> <code>{rep['ip']}</code>\n"
+                f"🖥️ <b>Server:</b> <code>{rep['server']}</code>\n\n"
+                f"🔗 <b>Destination URL:</b>\n<code>{html.escape(rep['final_url'])}</code>\n\n"
+                f"🔄 <b>Redirect Chain:</b>\n{redirect_txt}\n\n"
+                f"⚠️ <b>Security Checks:</b>\n{flags_txt}\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            bot.edit_message_text(out_msg, chat_id, wait_m.message_id, parse_mode="HTML", disable_web_page_preview=True)
+            return
+
+        # Specific Downloader States
+        if state == "awaiting_tiktok_url":
+            clear_state(user.id)
+            threading.Thread(target=download_and_send_tiktok, args=(chat_id, text), daemon=True).start()
+            return
+
+        elif state == "awaiting_insta_url":
+            clear_state(user.id)
+            threading.Thread(target=download_and_send_instagram, args=(chat_id, text), daemon=True).start()
+            return
+
+        elif state == "awaiting_pin_url":
+            clear_state(user.id)
+            threading.Thread(target=download_and_send_pinterest, args=(chat_id, text), daemon=True).start()
+            return
+
+        elif state == "awaiting_video_url":
+            clear_state(user.id)
+            threading.Thread(target=download_and_send_universal_video, args=(chat_id, text), daemon=True).start()
+            return
+
+        elif state == "awaiting_yt_thumb":
             clear_state(user.id)
             video_id = ""
             if "shorts/" in text:
@@ -1481,52 +2179,31 @@ if bot:
         elif state == "awaiting_num_info":
             clear_state(user.id)
             wait_m = bot.send_message(chat_id, "⏳ <b>তথ্য খোঁজা হচ্ছে, দয়া করে অপেক্ষা করুন...</b>", parse_mode="HTML")
-            api_keys = [
-                "num_live_mneEFIScOsKerA8d3hXBMPHiF4HkZ3dEFqtIvHFv",
-                "num_live_nTrhy606oIdTtY38in7aAqRgEJNKgKBqwTlhbtEE"
-            ]
-            selected_key = random.choice(api_keys)
-            api_url = "https://api.numlookupapi.com/v1/validate/" + urllib.parse.quote(text)
-            try:
-                r = requests.get(api_url, headers={"apikey": selected_key}, timeout=12).json()
-                if r.get("message"):
-                    bot.edit_message_text("⚠️ API লিমিট শেষ হয়েছে, দয়া করে একটু পর চেষ্টা করুন।", chat_id, wait_m.message_id)
-                    return
-                if not r.get("valid"):
-                    bot.edit_message_text("❌ নাম্বারটি সঠিক নয়! কান্ট্রি কোডসহ (যেমন: +880...) নাম্বার দিন।", chat_id, wait_m.message_id)
-                    return
+            info = resolve_phone_info(text)
 
-                num = r.get("number") or text
-                fname = r.get("first_name") or ""
-                lname = r.get("last_name") or ""
-                full_name = (fname + " " + lname).strip() or "Not Found/N/A"
-                country = r.get("country_name") or "N/A"
-                ccode = r.get("country_code") or "N/A"
-                city = r.get("location") or "Not Found"
-                carrier = r.get("carrier") or "N/A"
-                ltype = r.get("line_type") or "N/A"
-                clean_num = re.sub(r'[^0-9]', '', num)
-                wa_link = f"https://wa.me/{clean_num}"
+            wa_link = f"https://wa.me/{info['clean_digits']}"
+            tg_link = f"tg://resolve?phone={info['clean_digits']}"
 
-                info_txt = (
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "📞 <b>NUMBER INFORMATION</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"👤 <b>Owner Name    :</b> <code>{html.escape(full_name)}</code>\n"
-                    f"🔹 <b>Phone Number  :</b> <code>{html.escape(num)}</code>\n"
-                    f"🌍 <b>Country Name  :</b> <code>{html.escape(country)}</code>\n"
-                    f"🆔 <b>Country Code  :</b> <code>{html.escape(ccode)}</code>\n"
-                    f"🏙️ <b>City / Region :</b> <code>{html.escape(city)}</code>\n"
-                    f"📡 <b>Sim Company   :</b> <code>{html.escape(carrier)}</code>\n"
-                    f"📱 <b>Line Type     :</b> <code>{html.escape(ltype)}</code>\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🕵️‍♂️ <b>SOCIAL MEDIA TRACK:</b>\n💬 <a href='{wa_link}'>Direct WhatsApp Chat</a>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "✅ <i>Search Completed Successfully!</i>"
-                )
-                bot.edit_message_text(info_txt, chat_id, wait_m.message_id, parse_mode="HTML", disable_web_page_preview=True)
-            except Exception:
-                bot.edit_message_text("❌ সার্ভার থেকে তথ্য আনা সম্ভব হয়নি।", chat_id, wait_m.message_id)
+            info_txt = (
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "📞 <b>𝐏𝐇𝐎𝐍𝐄 𝐍𝐔𝐌𝐁𝐄𝐑 𝐈𝐍𝐅𝐎𝐑𝐌𝐀𝐓𝐈𝐎𝐍</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 <b>Owner / Name   :</b> <code>{html.escape(info['owner_name'])}</code>\n"
+                f"🔹 <b>Intl. Format   :</b> <code>{html.escape(info['intl_format'])}</code>\n"
+                f"🔹 <b>National Format:</b> <code>{html.escape(info['nat_format'])}</code>\n"
+                f"🌍 <b>Country        :</b> <code>{html.escape(info['country'])}</code>\n"
+                f"📡 <b>Carrier / SIM  :</b> <code>{html.escape(info['carrier'])}</code>\n"
+                f"📱 <b>Line Type      :</b> <code>{html.escape(info['type'])}</code>\n"
+                f"⏰ <b>Timezone       :</b> <code>{html.escape(info['timezone'])}</code>\n"
+                f"✅ <b>Is Valid       :</b> <code>{'Yes' if info['valid'] else 'No'}</code>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "🕵️‍♂️ <b>𝐃𝐈𝐑𝐄𝐂𝐓 𝐌𝐄𝐒𝐒𝐀𝐆𝐈𝐍𝐆:</b>\n"
+                f"💬 <a href='{wa_link}'>Direct WhatsApp Chat</a>\n"
+                f"✈️ <a href='{tg_link}'>Direct Telegram Contact</a>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ <i>Search Completed Successfully!</i>"
+            )
+            bot.edit_message_text(info_txt, chat_id, wait_m.message_id, parse_mode="HTML", disable_web_page_preview=True)
             return
 
         elif state == "awaiting_qr_text":
@@ -1619,16 +2296,29 @@ if bot:
             return
 
         # ==========================================
-        # 11. AUTOMATIC UNIVERSAL VIDEO URL HANDLER
+        # 11. AUTOMATIC URL DETECTOR (ALL PLATFORMS)
         # ==========================================
-        if text.startswith("http://") or text.startswith("https://"):
+        url_match = re.search(r'https?://[^\s<>"]+', text)
+        if url_match:
+            found_url = url_match.group(0).rstrip('.,;!?')
+            domain = urllib.parse.urlparse(found_url).netloc.lower()
+
             clear_state(user.id)
-            threading.Thread(
-                target=download_and_send_universal_video,
-                args=(chat_id, text),
-                daemon=True
-            ).start()
-            return
+            if any(k in domain for k in ["tiktok.com"]):
+                threading.Thread(target=download_and_send_tiktok, args=(chat_id, found_url), daemon=True).start()
+                return
+            elif any(k in domain for k in ["instagram.com", "instagr.am"]):
+                threading.Thread(target=download_and_send_instagram, args=(chat_id, found_url), daemon=True).start()
+                return
+            elif any(k in domain for k in ["pinterest.com", "pin.it"]):
+                threading.Thread(target=download_and_send_pinterest, args=(chat_id, found_url), daemon=True).start()
+                return
+            elif any(k in domain for k in ["youtube.com", "youtu.be", "facebook.com", "fb.watch", "fb.com"]):
+                threading.Thread(target=download_and_send_universal_video, args=(chat_id, found_url), daemon=True).start()
+                return
+            else:
+                threading.Thread(target=download_and_send_universal_video, args=(chat_id, found_url), daemon=True).start()
+                return
 
         bot.reply_to(
             message,
