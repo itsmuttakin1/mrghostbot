@@ -177,26 +177,39 @@ HTML_TEMPLATE = """
 """
 
 def resolve_url(url):
+    if not url:
+        return url
+    clean_u = url.strip()
+    if any(k in clean_u.lower() for k in ["youtube.com", "youtu.be"]):
+        return clean_u
     try:
-        res = requests.head(url, allow_redirects=True, timeout=12)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        }
+        res = requests.head(clean_u, allow_redirects=True, timeout=8, headers=headers)
         return res.url
     except Exception:
-        return url
+        return clean_u
 
 FFMPEG_DIR = os.path.abspath("ffmpeg_bin") if os.path.exists("ffmpeg_bin") else None
 HAS_FFMPEG = bool(FFMPEG_DIR or shutil.which("ffmpeg"))
 
 def get_ydl_options(output_path):
-    fmt = 'best[height<=720]/bestvideo[height<=720]+bestaudio/22/18/b[ext=mp4]/best' if HAS_FFMPEG else '22/18/b[ext=mp4]/best[ext=mp4]/best'
+    fmt = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if HAS_FFMPEG else '18/22/b[ext=mp4]/best[ext=mp4]/best'
     opts = {
         'format': fmt,
+        'merge_output_format': 'mp4',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
         'no_check_certificates': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android']
+                'player_client': ['android', 'web']
             }
         }
     }
@@ -1155,81 +1168,139 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
         msg_id = status_msg.message_id
 
     target_url = resolve_url(raw_url)
-    output_dir = f"downloads/{user_id}_{int(time.time())}"
+    output_dir = f"downloads/{user_id}_{int(time.time() * 1000)}"
     os.makedirs(output_dir, exist_ok=True)
     out_template = f'{output_dir}/%(id)s.%(ext)s'
-    ydl_opts = get_ydl_options(out_template)
 
+    video_title = "Social Video"
+    downloaded = False
+
+    # Strategy 1: Primary yt-dlp
     try:
-        video_title = "Social Video"
+        ydl_opts = get_ydl_options(out_template)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target_url, download=True)
             if info:
                 video_title = info.get('title') or info.get('description') or "Social Video"
-                if len(video_title) > 200:
-                    video_title = video_title[:200] + "..."
-
         files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
-        if not files:
-            # Retry with Android progressive format
-            try:
-                retry_opts = {
-                    'format': '18/best[height<=480]/best',
-                    'outtmpl': out_template,
-                    'quiet': True,
-                    'no_warnings': True,
-                    'no_check_certificates': True,
-                    'extractor_args': {'youtube': {'player_client': ['android']}}
+        if files:
+            downloaded = True
+    except Exception as e1:
+        print(f"[!] Primary yt-dlp error: {e1}", flush=True)
+
+    # Strategy 2: Android progressive format (No ffmpeg, no cookies needed)
+    if not downloaded:
+        try:
+            retry_opts = {
+                'format': '18/22/b[ext=mp4]/best[ext=mp4]/best',
+                'outtmpl': out_template,
+                'quiet': True,
+                'no_warnings': True,
+                'no_check_certificates': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android']
+                    }
                 }
-                with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
-                    info_r = ydl_retry.extract_info(target_url, download=True)
-                    if info_r:
-                        video_title = info_r.get('title') or "Video"
-                files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
-            except Exception:
-                pass
+            }
+            if FFMPEG_DIR:
+                retry_opts['ffmpeg_location'] = FFMPEG_DIR
+            if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
+                retry_opts['cookiefile'] = "cookies.txt"
+            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                info2 = ydl_retry.extract_info(target_url, download=True)
+                if info2:
+                    video_title = info2.get('title') or info2.get('description') or "Social Video"
+            files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+            if files:
+                downloaded = True
+        except Exception as e2:
+            print(f"[!] Strategy 2 (Android) error: {e2}", flush=True)
 
-        if not files:
-            # Fallback to cobalt
-            if fallback_cobalt_download(user_id, target_url, msg_id):
+    # Strategy 3: TV Embedded client retry (Bypasses bot checks)
+    if not downloaded and any(k in target_url.lower() for k in ["youtube.com", "youtu.be"]):
+        try:
+            tv_opts = {
+                'format': '18/22/b[ext=mp4]/best',
+                'outtmpl': out_template,
+                'quiet': True,
+                'no_warnings': True,
+                'no_check_certificates': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['tv_embedded']
+                    }
+                }
+            }
+            if FFMPEG_DIR:
+                tv_opts['ffmpeg_location'] = FFMPEG_DIR
+            with yt_dlp.YoutubeDL(tv_opts) as ydl_tv:
+                info3 = ydl_tv.extract_info(target_url, download=True)
+                if info3:
+                    video_title = info3.get('title') or info3.get('description') or "Social Video"
+            files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+            if files:
+                downloaded = True
+        except Exception as e3:
+            print(f"[!] Strategy 3 (tv_embedded) error: {e3}", flush=True)
+
+    # If downloaded successfully
+    if downloaded:
+        try:
+            files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+            if files:
+                file_path = files[0]
+                file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
+                if file_size_mb > 49.5:
+                    bot.edit_message_text("❌ ভিডিও সাইজ ৫০MB-এর বেশি হওয়ায় টেলিগ্রামে সরাসরি পাঠানো সম্ভব নয়।", user_id, msg_id)
+                else:
+                    escaped_title = html.escape(video_title[:200])
+                    caption_text = (
+                        f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
+                        f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
+                        f"<code>{escaped_title}</code>\n\n"
+                        f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                    )
+                    with open(file_path, 'rb') as vf:
+                        bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
+                    try:
+                        bot.delete_message(user_id, msg_id)
+                    except Exception:
+                        pass
                 return
-            bot.edit_message_text("⚠️ ভিডিও ডাউনলোড করা সম্ভব হয়নি। লিংকটি সঠিক কিনা যাচাই করুন।", user_id, msg_id)
-            return
+        except Exception as send_err:
+            print(f"[!] Error sending video: {send_err}", flush=True)
 
-        file_path = files[0]
-        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-
-        if file_size_mb > 49.5:
-            bot.edit_message_text("❌ ভিডিও সাইজ ৫০MB-এর বেশি হওয়ায় টেলিগ্রামে সরাসরি পাঠানো সম্ভব নয়।", user_id, msg_id)
-        else:
-            escaped_title = html.escape(video_title)
-            caption_text = (
-                f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
-                f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
-                f"<code>{escaped_title}</code>\n\n"
-                f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
-            )
-            with open(file_path, 'rb') as vf:
-                bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
-            try:
-                bot.delete_message(user_id, msg_id)
-            except Exception:
-                pass
-
-    except Exception as e:
-        err_str = str(e)
-        if "tiktok.com" in target_url:
-            download_and_send_tiktok(user_id, target_url)
-            return
-
-        # Fallback to cobalt
+    # Strategy 4: Cobalt fallback
+    try:
         if fallback_cobalt_download(user_id, target_url, msg_id):
             return
+    except Exception:
+        pass
 
-        bot.edit_message_text(f"⚠️ ডাউনলোড ব্যর্থ হয়েছে: {err_str[:120]}", user_id, msg_id, parse_mode="HTML")
+    # Strategy 5: TikTok fallback if it's TikTok
+    if "tiktok.com" in target_url:
+        download_and_send_tiktok(user_id, target_url)
+        return
+
+    # If all methods failed
+    try:
+        bot.edit_message_text(
+            "⚠️ <b>ভিডিওটি ডাউনলোড করা সম্ভব হয়নি।</b>\n\n"
+            "অনুগ্রহ করে লিংকটি সঠিক ও পাবলিক কিনা যাচাই করুন অথবা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।",
+            user_id,
+            msg_id,
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
     finally:
         if os.path.exists(output_dir):
-            shutil.rmtree(output_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(output_dir, ignore_errors=True)
+            except Exception:
+                pass
 
 # Helper: Number to Info
 def resolve_phone_info(number_text):
