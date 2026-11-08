@@ -1,7 +1,6 @@
 import os
 import sys
 import re
-import io
 import glob
 import time
 import html
@@ -24,7 +23,6 @@ import requests
 import phonenumbers
 from phonenumbers import geocoder, carrier, timezone
 from dotenv import load_dotenv
-from PIL import Image
 
 load_dotenv()
 
@@ -42,19 +40,6 @@ REQUIRED_CHANNEL_2_URL = "https://t.me/+RlwOoen4k05kMDg9"
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "").strip()
 
 START_PHOTO_PATH = "start_photo.jpg"
-APK_BANNER_PATH = "apk_banner.jpg"
-APK_API_URL = "https://app-creator-x.ueu.workers.dev/api/v1/build"
-
-MAX_HTML_SIZE = 10 * 1024 * 1024
-MAX_ZIP_SIZE = 10 * 1024 * 1024
-MAX_ICON_SIZE = 6 * 1024 * 1024
-MAX_ICON_PIXELS = 4_000_000
-MAX_TOTAL_BODY = 16_842_752
-MAX_TOTAL_FILES = MAX_TOTAL_BODY - 64 * 1024
-MAX_APP_NAME_UTF16 = 80
-MAX_APP_NAME_UTF8 = 120
-
-APK_SESSIONS = {}
 
 if not BOT_TOKEN:
     print("❌ CRITICAL ERROR: BOT_TOKEN is missing in Environment Variables!", flush=True)
@@ -202,19 +187,15 @@ FFMPEG_DIR = os.path.abspath("ffmpeg_bin") if os.path.exists("ffmpeg_bin") else 
 
 def get_ydl_options(output_path):
     opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[height<=720]/bestvideo[height<=720]+bestaudio/best',
         'merge_output_format': 'mp4',
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        },
+        'no_check_certificates': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'mweb'],
-                'player_skip': ['webpage', 'configs']
+                'player_client': ['android', 'ios']
             }
         }
     }
@@ -738,11 +719,7 @@ def get_main_reply_keyboard(user_id=None):
     markup.row(
         types.KeyboardButton("📂 File Sharing Bot", style="success")
     )
-    # Row 2: Website to APK (Blue / Primary)
-    markup.row(
-        types.KeyboardButton("📱 Website to APK", style="primary")
-    )
-    # Row 3: YouTube (Red / Danger) | Facebook (Blue / Primary)
+    # Row 2: YouTube (Red / Danger) | Facebook (Blue / Primary)
     markup.row(
         types.KeyboardButton("🎥 YouTube Downloader", style="danger"),
         types.KeyboardButton("📹 Facebook Download", style="primary")
@@ -914,34 +891,70 @@ def send_shared_file_by_code(chat_id, file_code):
         return
 
     file_id, file_type, file_name, caption = row
-    bot.send_message(chat_id, "⏳ <b>আপনার ফাইল পাঠানো হচ্ছে...</b>", parse_mode="HTML")
+    status_m = bot.send_message(chat_id, "⏳ <b>আপনার ফাইল পাঠানো হচ্ছে...</b>", parse_mode="HTML")
 
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
 
+    sent_msg = None
     try:
         if file_type == "video":
-            bot.send_video(chat_id, file_id, caption=caption or "", reply_markup=markup)
+            sent_msg = bot.send_video(chat_id, file_id, caption=caption or "", reply_markup=markup)
         elif file_type == "photo":
-            bot.send_photo(chat_id, file_id, caption=caption or "", reply_markup=markup)
+            sent_msg = bot.send_photo(chat_id, file_id, caption=caption or "", reply_markup=markup)
         else:
-            bot.send_document(chat_id, file_id, caption=caption or file_name or "", reply_markup=markup)
+            sent_msg = bot.send_document(chat_id, file_id, caption=caption or file_name or "", reply_markup=markup)
+
+        try:
+            bot.delete_message(chat_id, status_m.message_id)
+        except Exception:
+            pass
+
+        if sent_msg:
+            notice_text = (
+                "⚠️ <b>জরুরী নোটিশ:</b>\n"
+                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                "কপিরাইট ও নিরাপত্তার স্বার্থে এই ফাইলটি <b>৫ মিনিট (5 mins)</b> পর আপনার ইনবক্স থেকে স্বয়ংক্রিয়ভাবে মুছে যাবে।\n\n"
+                "📌 <i>প্রয়োজনে ফাইলটি এখনই আপনার 'Saved Messages'-এ ফরোয়ার্ড করে রাখুন অথবা ফোনে সেভ করুন।</i>\n"
+                "🔄 <i>(লিংকটি পার্মানেন্ট থাকবে; পরবর্তীতে যেকোনো সময় লিংকে ক্লিক করলেই আবার ফাইলটি পাবেন।)</i>"
+            )
+            notice_msg = bot.send_message(chat_id, notice_text, parse_mode="HTML")
+
+            # Auto-delete messages from inbox after 5 minutes (300 seconds)
+            def auto_delete_inbox_messages(target_cid, target_mids, delay=300):
+                time.sleep(delay)
+                for mid in target_mids:
+                    try:
+                        bot.delete_message(target_cid, mid)
+                    except Exception:
+                        pass
+                try:
+                    bot.send_message(
+                        target_cid,
+                        "⏳ <b>সময় সমাপ্ত!</b>\n৫ মিনিট পূর্ণ হওয়ায় পূর্বের ফাইলটি ইনবক্স থেকে মুছে দেওয়া হয়েছে। পুনরায় ফাইলটি পেতে মূল শেয়ার লিংকে ক্লিক করুন।"
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(target=auto_delete_inbox_messages, args=(chat_id, [sent_msg.message_id, notice_msg.message_id], 300), daemon=True).start()
+
     except Exception as e:
         bot.send_message(chat_id, f"❌ ফাইল পাঠাতে সমস্যা হয়েছে: {str(e)[:100]}")
 
 def fallback_cobalt_download(user_id, url, status_msg_id=None):
     cobalt_instances = [
-        "https://api.cobalt.tools/api/json",
-        "https://cobalt-api.kwiatekm.pl/api/json",
-        "https://api.wuk.sh/api/json"
+        ("https://cobalt-api.kwiatekm.pl/", {"url": url, "videoQuality": "720"}),
+        ("https://api.cobalt.tools/", {"url": url, "videoQuality": "720"}),
+        ("https://api.wuk.sh/", {"url": url, "videoQuality": "720"}),
+        ("https://api.cobalt.tools/api/json", {"url": url}),
+        ("https://cobalt-api.kwiatekm.pl/api/json", {"url": url})
     ]
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-    payload = {"url": url}
-    for c_url in cobalt_instances:
+    for c_url, payload in cobalt_instances:
         try:
             res = requests.post(c_url, json=payload, headers=headers, timeout=12)
             if res.status_code == 200:
@@ -1157,10 +1170,29 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
 
         files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
         if not files:
+            # Retry with Android progressive format
+            try:
+                retry_opts = {
+                    'format': '18/best[height<=480]/best',
+                    'outtmpl': out_template,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'no_check_certificates': True,
+                    'extractor_args': {'youtube': {'player_client': ['android']}}
+                }
+                with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                    info_r = ydl_retry.extract_info(target_url, download=True)
+                    if info_r:
+                        video_title = info_r.get('title') or "Video"
+                files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+            except Exception:
+                pass
+
+        if not files:
             # Fallback to cobalt
             if fallback_cobalt_download(user_id, target_url, msg_id):
                 return
-            bot.edit_message_text("❌ ভিডিও ডাউনলোড করা সম্ভব হয়নি।", user_id, msg_id)
+            bot.edit_message_text("⚠️ ভিডিও ডাউনলোড করা সম্ভব হয়নি। লিংকটি সঠিক কিনা যাচাই করুন।", user_id, msg_id)
             return
 
         file_path = files[0]
@@ -1188,19 +1220,45 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
         if "tiktok.com" in target_url:
             download_and_send_tiktok(user_id, target_url)
             return
+
+        # Attempt retry with Android progressive format
+        try:
+            retry_opts = {
+                'format': '18/best[height<=480]/best',
+                'outtmpl': out_template,
+                'quiet': True,
+                'no_warnings': True,
+                'no_check_certificates': True,
+                'extractor_args': {'youtube': {'player_client': ['android']}}
+            }
+            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                info_r = ydl_retry.extract_info(target_url, download=True)
+                r_title = (info_r.get('title') if info_r else None) or "Video"
+            files_r = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+            if files_r:
+                file_path_r = files_r[0]
+                escaped_title = html.escape(r_title[:200])
+                caption_text = (
+                    f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
+                    f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
+                    f"<code>{escaped_title}</code>\n\n"
+                    f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                )
+                with open(file_path_r, 'rb') as vf:
+                    bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
+                try:
+                    bot.delete_message(user_id, msg_id)
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
+
         # Try Cobalt fallback for YouTube / general
         if fallback_cobalt_download(user_id, target_url, msg_id):
             return
 
-        if "confirm you're not a bot" in err_str.lower() or "sign in" in err_str.lower():
-            err_msg = (
-                "⚠️ <b>YouTube Bot Detection Error:</b>\n\n"
-                "ইউটিউব বর্তমানে এই ভিডিওর জন্য কুকিজ ভেরিফিকেশন দাবি করছে।\n"
-                "এডমিনকে <code>cookies.txt</code> ফাইল কনফিগার করার অনুরোধ করা হয়েছে।"
-            )
-        else:
-            err_msg = f"⚠️ ডাউনলোড ব্যর্থ হয়েছে: {err_str[:120]}"
-
+        err_msg = "⚠️ দুঃখিত, ভিডিওটি ডাউনলোড করা সম্ভব হয়নি। লিংকটি সঠিক কিনা বা পাবলিক কিনা যাচাই করুন।"
         try:
             bot.edit_message_text(err_msg, user_id, msg_id, parse_mode="HTML")
         except Exception:
@@ -1434,233 +1492,6 @@ def upload_image_to_imgbb(file_bytes):
         return {"success": False, "error": str(e)}
 
 
-# ==========================================
-# APK BUILDER (WEBSITE TO APK) HELPERS
-# ==========================================
-def validate_app_name(value):
-    value = (value or "").strip()
-    if not value:
-        return "দয়া করে একটি সঠিক অ্যাপ নাম লিখুন।"
-    utf16_units = len(value.encode("utf-16-le")) // 2
-    utf8_bytes = len(value.encode("utf-8"))
-    if utf16_units > MAX_APP_NAME_UTF16:
-        return f"অ্যাপ নাম অনেক বড় ({utf16_units}/80 UTF-16 units)।"
-    if utf8_bytes > MAX_APP_NAME_UTF8:
-        return f"অ্যাপ নাম সাইজে বড় ({utf8_bytes}/120 UTF-8 bytes)।"
-    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value):
-        return "অ্যাপ নামে কোনো ইনভ্যালিড কন্ট্রোল ক্যারেক্টার থাকতে পারবে না।"
-    return None
-
-def validate_icon(content):
-    if not content:
-        return "আইকন ফাইলটি খালি।"
-    try:
-        with Image.open(io.BytesIO(content)) as image:
-            if image.format not in ("PNG", "JPEG"):
-                return "শুধুমাত্র PNG এবং JPEG ফরম্যাটের আইকন গ্রহণযোগ্য।"
-            width, height = image.size
-            if width * height > MAX_ICON_PIXELS:
-                return "আইকন ছবির সাইজ অনেক বড় (সর্বোচ্চ 4 Megapixels অনুমোদিত)।"
-            if image.format == "PNG" and image.info.get("interlace"):
-                return "Interlaced PNG আইকন কাজ করবে না। সাধারণ Standard PNG ছবি দিন।"
-    except Exception:
-        return "ফাইলটি কোনো বৈধ PNG বা JPEG ছবি নয়।"
-    return None
-
-def send_apk_home(chat_id, user_id=None):
-    if user_id:
-        clear_state(user_id)
-        APK_SESSIONS.pop(user_id, None)
-
-    caption = (
-        "📱 <b>𝐀𝐏𝐊 𝐂𝐎𝐍𝐕𝐄𝐑𝐓𝐄𝐑 𝐒𝐓𝐔𝐃𝐈𝐎 — 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓</b>\n"
-        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-        "🌐 <b>Website to Android APK</b>\n\n"
-        "আপনার যেকোনো HTML ওয়েবসাইট বা ZIP প্রজেক্টকে সরাসরি অ্যান্ড্রয়েড অ্যাপ্লিকেশনে (APK) রূপান্তর করুন।\n\n"
-        "⚡ <i>Fast • Secure • Real Android APK</i>\n"
-        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
-    )
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🚀 Create APK", callback_data="apk:new"),
-        types.InlineKeyboardButton("📘 How it works", callback_data="apk:help")
-    )
-
-    if os.path.exists(APK_BANNER_PATH):
-        try:
-            with open(APK_BANNER_PATH, "rb") as photo:
-                bot.send_photo(chat_id, photo, caption=caption, parse_mode="HTML", reply_markup=markup)
-                return
-        except Exception as e:
-            print(f"[!] Error sending APK banner: {e}", flush=True)
-
-    bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
-
-def send_apk_confirmation(chat_id, user_id):
-    session = APK_SESSIONS.get(user_id)
-    if not session or "html" not in session or "icon" not in session:
-        bot.send_message(chat_id, "❌ সেশন পাওয়া যায়নি। অনুগ্রহ করে আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user_id))
-        return
-    app_name = session.get("app_name", "My App")
-    html_name, html_bytes = session["html"]
-    icon_name, icon_bytes = session["icon"]
-
-    summary_text = (
-        "<b>Step 4/5 — Review & Confirmation</b>\n"
-        "✅  ✅  ✅  🔵  ⚪\n\n"
-        "📋 <b>সবকিছু প্রস্তুত! কনফার্মেশন দিন:</b>\n"
-        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n"
-        f"📛 <b>App Name:</b> <b>{html.escape(app_name)}</b>\n"
-        f"📄 <b>Website:</b> <code>{html.escape(html_name)}</code> ({round(len(html_bytes)/1024, 1)} KB)\n"
-        f"🖼️ <b>Icon:</b> <code>{html.escape(icon_name)}</code> ({round(len(icon_bytes)/1024, 1)} KB)\n"
-        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-        "সব তথ্য সঠিক থাকলে <b>Build APK</b> বাটনে চাপুন:"
-    )
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("✅ Build APK", callback_data="apk:build"),
-        types.InlineKeyboardButton("✏️ Rename", callback_data="apk:rename")
-    )
-    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-    bot.send_message(chat_id, summary_text, parse_mode="HTML", reply_markup=markup)
-
-def animate_apk_build(chat_id, message_id, stop_event):
-    frames = ["◐", "◓", "◑", "◒"]
-    stages = [
-        ("Uploading website files", "📤", 25),
-        ("Preparing Android WebView", "🧩", 50),
-        ("Compiling Android package", "⚙️", 75),
-        ("Finalizing & Packing APK", "🔐", 95),
-    ]
-    index = 0
-    while not stop_event.is_set():
-        label, icon, percent = stages[index % len(stages)]
-        filled = max(1, percent // 10)
-        bar = "🟦" * filled + "▫️" * (10 - filled)
-        text = (
-            f"<b>{frames[index % len(frames)]} 𝐀𝐏𝐊 𝐁𝐔𝐈𝐋𝐃 𝐈𝐍 𝐏𝐑𝐎𝐆𝐑𝐄𝐒𝐒</b>\n"
-            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            f"{icon} <b>{label}...</b>\n"
-            f"{bar} <b>{percent}%</b>\n\n"
-            "☕ অনুগ্রহ করে ১–২ মিনিট অপেক্ষা করুন...\n"
-            "<i>আপনার ফাইলগুলো নিরাপদে প্রসেস হচ্ছে।</i>"
-        )
-        try:
-            bot.edit_message_text(text, chat_id, message_id, parse_mode="HTML")
-        except Exception:
-            pass
-        index += 1
-        stop_event.wait(2.0)
-
-def build_apk_task(chat_id, user_id, status_message_id=None):
-    session = APK_SESSIONS.get(user_id)
-    if not session or "html" not in session or "icon" not in session:
-        bot.send_message(chat_id, "❌ সেশনের মেয়াদ শেষ হয়েছে। দয়া করে আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user_id))
-        return
-
-    stop_event = threading.Event()
-    anim_thread = None
-    if status_message_id:
-        anim_thread = threading.Thread(target=animate_apk_build, args=(chat_id, status_message_id, stop_event), daemon=True)
-        anim_thread.start()
-    else:
-        try:
-            m = bot.send_message(chat_id, "⚙️ <b>Preparing your APK build...</b>", parse_mode="HTML")
-            status_message_id = m.message_id
-            anim_thread = threading.Thread(target=animate_apk_build, args=(chat_id, status_message_id, stop_event), daemon=True)
-            anim_thread.start()
-        except Exception:
-            pass
-
-    app_name = session["app_name"]
-    html_name, html_bytes = session["html"]
-    icon_name, icon_bytes = session["icon"]
-
-    html_mime = "application/zip" if html_name.lower().endswith(".zip") else "text/html"
-    icon_mime = "image/png" if icon_name.lower().endswith("png") else "image/jpeg"
-    files = {
-        "html": (html_name, html_bytes, html_mime),
-        "icon": (icon_name, icon_bytes, icon_mime)
-    }
-
-    try:
-        resp = requests.post(
-            APK_API_URL,
-            data={"app_name": app_name},
-            files=files,
-            timeout=150
-        )
-        stop_event.set()
-        if anim_thread:
-            anim_thread.join(timeout=2.0)
-
-        content_type = resp.headers.get("Content-Type", "")
-        if resp.status_code == 200 and "application/vnd.android.package-archive" in content_type:
-            if status_message_id:
-                try:
-                    bot.edit_message_text("✅ <b>APK তৈরি সম্পন্ন হয়েছে!</b>\n📦 ফাইল আপনার চ্যাটে পাঠানো হচ্ছে...", chat_id, status_message_id, parse_mode="HTML")
-                except Exception:
-                    pass
-
-            disposition = resp.headers.get("Content-Disposition", "")
-            match = re.search(r'filename=(?:"([^"]+)"|([^;]+))', disposition)
-            apk_name = (match.group(1) or match.group(2)).strip() if match else f"{app_name}.apk"
-            if not apk_name.lower().endswith(".apk"):
-                apk_name += ".apk"
-
-            clean_caption = (
-                "🎉 <b>𝐀𝐏𝐊 𝐁𝐔𝐈𝐋𝐃 𝐂𝐎𝐌𝐏𝐋𝐄𝐓𝐄!</b>\n"
-                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-                f"📦 <b>App Name:</b> <code>{html.escape(apk_name)}</code>\n"
-                "⚡ <b>Status:</b> Ready to install\n\n"
-                '👨‍💻 <b>Powered by</b> <a href="https://t.me/mrghost_121">Mr Ghost</a>'
-            )
-            bot.send_document(
-                chat_id,
-                (apk_name, resp.content),
-                caption=clean_caption,
-                parse_mode="HTML",
-                reply_markup=get_main_reply_keyboard(user_id)
-            )
-        else:
-            err_msg = ""
-            try:
-                err_payload = resp.json()
-                err_msg = err_payload.get("error", resp.text)
-            except Exception:
-                err_msg = resp.text or f"HTTP {resp.status_code}"
-
-            fail_txt = (
-                f"❌ <b>APK তৈরি ব্যর্থ হয়েছে!</b> (Status: {resp.status_code})\n"
-                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-                f"⚠️ কারণ: <code>{html.escape(str(err_msg)[:300])}</code>\n\n"
-                "দয়া করে ফাইল সাইজ ও কনফিগারেশন চেক করে আবার চেষ্টা করুন।"
-            )
-            if status_message_id:
-                try:
-                    bot.edit_message_text(fail_txt, chat_id, status_message_id, parse_mode="HTML")
-                except Exception:
-                    bot.send_message(chat_id, fail_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
-            else:
-                bot.send_message(chat_id, fail_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
-
-    except Exception as exc:
-        stop_event.set()
-        if anim_thread:
-            anim_thread.join(timeout=2.0)
-        err_txt = f"❌ <b>সার্ভারে সমস্যা হয়েছে:</b>\n<code>{html.escape(str(exc)[:200])}</code>\nঅনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।"
-        if status_message_id:
-            try:
-                bot.edit_message_text(err_txt, chat_id, status_message_id, parse_mode="HTML")
-            except Exception:
-                bot.send_message(chat_id, err_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
-        else:
-            bot.send_message(chat_id, err_txt, parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
-    finally:
-        stop_event.set()
-        clear_state(user_id)
-        APK_SESSIONS.pop(user_id, None)
-
 
 # ==========================================
 # 6. BOT HANDLERS (COMMANDS & TOOLS)
@@ -1823,13 +1654,6 @@ if bot:
         )
         bot.send_message(message.chat.id, txt, parse_mode="HTML", reply_markup=get_admin_keyboard())
 
-    @bot.message_handler(commands=['newapk'])
-    def handle_newapk_cmd(message):
-        if not verify_user_access(message, "verify_apk"):
-            return
-        notify_admin_log(message.from_user, "Website to APK Studio")
-        send_apk_home(message.chat.id, message.from_user.id)
-
     # ==========================================
     # 7. MEDIA UPLOAD HANDLER
     # ==========================================
@@ -1885,127 +1709,6 @@ if bot:
                     bot.edit_message_text(f"❌ <b>আপলোড ব্যর্থ হয়েছে:</b> {res.get('error')}", message.chat.id, wait_m.message_id, parse_mode="HTML")
             except Exception as e:
                 bot.edit_message_text(f"❌ ছবি প্রসেস করতে সমস্যা হয়েছে: {e}", message.chat.id, wait_m.message_id)
-            return
-
-        # APK Builder - Step 2: HTML / ZIP Document
-        if state == "apk_step_html":
-            if not message.document:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.reply_to(message, "⚠️ <b>ফাইল প্রয়োজন:</b> দয়া করে <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইলটি ডকুমেন্ট (Document/File) হিসেবে পাঠান:", parse_mode="HTML", reply_markup=markup)
-                return
-
-            doc = message.document
-            filename = doc.file_name or "index.html"
-            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-            if ext not in ["html", "htm", "zip"]:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.reply_to(message, "⚠️ <b>ফরম্যাট গ্রহণযোগ্য নয়!</b> শুধুমাত্র <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইল পাঠান:", parse_mode="HTML", reply_markup=markup)
-                return
-
-            limit = MAX_ZIP_SIZE if ext == "zip" else MAX_HTML_SIZE
-            if doc.file_size and doc.file_size > limit:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.reply_to(message, f"⚠️ <b>ফাইল অনেক বড়!</b> সর্বোচ্চ {round(limit / (1024*1024))} MB পর্যন্ত অনুমোদিত। ছোট ফাইল পাঠান:", parse_mode="HTML", reply_markup=markup)
-                return
-
-            wait_m = bot.send_message(message.chat.id, "⏳ <b>ওয়েবসাইট ফাইল ডাউনলোড ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
-            try:
-                file_info = bot.get_file(doc.file_id)
-                content = bot.download_file(file_info.file_path)
-            except Exception as e:
-                bot.edit_message_text(f"❌ ফাইল ডাউনলোড করতে ব্যর্থ: {e}", message.chat.id, wait_m.message_id)
-                return
-
-            session = APK_SESSIONS.setdefault(user_id, {})
-            session["html"] = (filename, content)
-            set_state(user_id, "apk_step_icon")
-            try:
-                bot.delete_message(message.chat.id, wait_m.message_id)
-            except Exception:
-                pass
-
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-            next_txt = (
-                "<b>Step 3/5 — App Icon</b>\n"
-                "✅  ✅  🔵  ⚪  ⚪\n\n"
-                f"✅ ওয়েবসাইট ফাইল গৃহীত: <code>{html.escape(filename)}</code> ({round(len(content)/1024, 1)} KB)\n\n"
-                "🖼️ <b>আপনার অ্যাপের আইকন (App Icon) পাঠান:</b>\n"
-                "একটি স্ট্যান্ডার্ড PNG বা JPEG ছবি পাঠান (Photo বা Document হিসেবে, সর্বোচ্চ 6 MB, 4 Megapixels)।"
-            )
-            bot.send_message(message.chat.id, next_txt, parse_mode="HTML", reply_markup=markup)
-            return
-
-        # APK Builder - Step 3: Icon File
-        if state == "apk_step_icon":
-            filename = "icon.png"
-            file_id = None
-            if message.document:
-                doc = message.document
-                filename = doc.file_name or "icon.png"
-                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-                if ext not in ["png", "jpg", "jpeg"]:
-                    markup = types.InlineKeyboardMarkup()
-                    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                    bot.reply_to(message, "⚠️ শুধুমাত্র <b>PNG</b> অথবা <b>JPEG</b> ফরম্যাটের ছবি পাঠান:", parse_mode="HTML", reply_markup=markup)
-                    return
-                if doc.file_size and doc.file_size > MAX_ICON_SIZE:
-                    markup = types.InlineKeyboardMarkup()
-                    markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                    bot.reply_to(message, "⚠️ আইকন ফাইলের সাইজ অনেক বড় (সর্বোচ্চ 6 MB অনুমোদিত):", parse_mode="HTML", reply_markup=markup)
-                    return
-                file_id = doc.file_id
-            elif message.photo:
-                file_id = message.photo[-1].file_id
-                filename = "icon.jpg"
-            else:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.reply_to(message, "⚠️ অ্যাপ আইকন হিসেবে একটি PNG বা JPEG ছবি পাঠান (ফটো বা ফাইল):", parse_mode="HTML", reply_markup=markup)
-                return
-
-            wait_m = bot.send_message(message.chat.id, "⏳ <b>আইকন ভেরিফাই করা হচ্ছে...</b>", parse_mode="HTML")
-            try:
-                file_info = bot.get_file(file_id)
-                content = bot.download_file(file_info.file_path)
-            except Exception as e:
-                bot.edit_message_text(f"❌ আইকন ডাউনলোড করতে ব্যর্থ: {e}", message.chat.id, wait_m.message_id)
-                return
-
-            if len(content) > MAX_ICON_SIZE:
-                bot.edit_message_text("⚠️ আইকন ফাইলের সাইজ অনেক বড় (সর্বোচ্চ 6 MB অনুমোদিত)। ছোট ছবি দিন।", message.chat.id, wait_m.message_id)
-                return
-
-            icon_err = validate_icon(content)
-            if icon_err:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.edit_message_text(f"⚠️ <b>আইকন গ্রহণযোগ্য নয়:</b>\n{html.escape(icon_err)}\n\nদয়া করে স্ট্যান্ডার্ড PNG বা JPEG ছবি পাঠান:", message.chat.id, wait_m.message_id, parse_mode="HTML", reply_markup=markup)
-                return
-
-            session = APK_SESSIONS.get(user_id)
-            if not session or "html" not in session:
-                clear_state(user_id)
-                bot.edit_message_text("❌ সেশনের মেয়াদ শেষ হয়েছে! আবার শুরু করুন।", message.chat.id, wait_m.message_id)
-                return
-
-            if len(session["html"][1]) + len(content) > MAX_TOTAL_FILES:
-                clear_state(user_id)
-                APK_SESSIONS.pop(user_id, None)
-                bot.edit_message_text("⚠️ ওয়েবসাইট ফাইল ও আইকন একসাথে রিকুয়েস্ট লিমিট অতিক্রম করেছে। ছোট ফাইল দিয়ে আবার চেষ্টা করুন।", message.chat.id, wait_m.message_id)
-                return
-
-            session["icon"] = (filename, content)
-            clear_state(user_id)
-            try:
-                bot.delete_message(message.chat.id, wait_m.message_id)
-            except Exception:
-                pass
-
-            send_apk_confirmation(message.chat.id, user_id)
             return
 
         if not verify_user_access(message, "verify_upload"):
@@ -2074,8 +1777,6 @@ if bot:
             if data.startswith("verify_file|"):
                 file_code = data.split("|", 1)[1]
                 send_shared_file_by_code(chat_id, file_code)
-            elif data == "verify_apk":
-                send_apk_home(chat_id, user_id)
             else:
                 bot.send_message(
                     chat_id,
@@ -2089,100 +1790,6 @@ if bot:
             bot.answer_callback_query(call.id, "⚠️ আগে উভয় চ্যানেলে জয়েন করুন!", show_alert=True)
             send_join_prompt(chat_id, "verify_home")
             return
-
-        # APK Builder Callbacks
-        if data.startswith("apk:"):
-            if data == "apk:new":
-                bot.answer_callback_query(call.id)
-                APK_SESSIONS[user_id] = {}
-                set_state(user_id, "apk_step_name")
-                prompt_txt = (
-                    "<b>Step 1/5 — App Name</b>\n"
-                    "🔵  ⚪  ⚪  ⚪  ⚪\n\n"
-                    "📛 <b>আপনার অ্যাপটির নাম কী হবে?</b>\n\n"
-                    "অ্যাপের নাম লিখে পাঠান (১ থেকে ৮০ অক্ষরের মধ্যে):"
-                )
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.send_message(chat_id, prompt_txt, parse_mode="HTML", reply_markup=markup)
-                return
-
-            elif data == "apk:help":
-                bot.answer_callback_query(call.id)
-                apk_help = (
-                    "<b>📘 How it works — Website to APK</b>\n"
-                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-                    "<b>১.</b> <b>Create APK</b> বাটনে চাপুন।\n"
-                    "<b>২.</b> অ্যাপের নাম (App Name) লিখে পাঠান (১–৮০ অক্ষর)।\n"
-                    "<b>৩.</b> ওয়েবসাইটের ফাইল <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ডকুমেন্ট হিসেবে পাঠান (সর্বোচ্চ 10 MB)।\n"
-                    "<b>৪.</b> অ্যাপের আইকন হিসেবে PNG বা JPEG ছবি পাঠান (সর্বোচ্চ 6 MB, 4 MP)।\n"
-                    "<b>৫.</b> রিভিউ দেখে <b>Build APK</b> বাটনে চাপুন।\n\n"
-                    "⚡ কিছুক্ষণের মধ্যেই আপনার কাঙ্ক্ষিত অ্যান্ড্রয়েড APK ফাইল তৈরি হয়ে চ্যাটে চলে আসবে!"
-                )
-                markup = types.InlineKeyboardMarkup(row_width=2)
-                markup.add(
-                    types.InlineKeyboardButton("🚀 Create APK", callback_data="apk:new"),
-                    types.InlineKeyboardButton("⬅️ Back to Studio", callback_data="apk:home")
-                )
-                try:
-                    if call.message.content_type == "photo":
-                        bot.edit_message_caption(apk_help, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
-                    else:
-                        bot.edit_message_text(apk_help, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
-                except Exception:
-                    bot.send_message(chat_id, apk_help, parse_mode="HTML", reply_markup=markup)
-                return
-
-            elif data == "apk:home":
-                bot.answer_callback_query(call.id)
-                try:
-                    bot.delete_message(chat_id, call.message.message_id)
-                except Exception:
-                    pass
-                send_apk_home(chat_id, user_id)
-                return
-
-            elif data == "apk:cancel":
-                bot.answer_callback_query(call.id, "বাতিল করা হয়েছে")
-                clear_state(user_id)
-                APK_SESSIONS.pop(user_id, None)
-                try:
-                    bot.edit_message_text("✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", chat_id, call.message.message_id, parse_mode="HTML")
-                except Exception:
-                    bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user_id))
-                return
-
-            elif data == "apk:rename":
-                session = APK_SESSIONS.get(user_id)
-                if not session:
-                    bot.answer_callback_query(call.id, "Session expired. Start again.", show_alert=True)
-                    return
-                bot.answer_callback_query(call.id)
-                set_state(user_id, "apk_step_name_rename")
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.send_message(
-                    chat_id,
-                    "<b>Step 1/5 — Rename App</b>\n"
-                    "🔵  ⚪  ⚪  ⚪  ⚪\n\n"
-                    "📛 <b>নতুন অ্যাপের নাম লিখে পাঠান (১-৮০ অক্ষর):</b>",
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-                return
-
-            elif data == "apk:build":
-                session = APK_SESSIONS.get(user_id)
-                if not session or "html" not in session or "icon" not in session:
-                    bot.answer_callback_query(call.id, "Session expired. Start again.", show_alert=True)
-                    return
-                bot.answer_callback_query(call.id, "Build started")
-                try:
-                    bot.edit_message_text("⚙️ <b>Preparing your APK build...</b>\n<i>This may take up to two minutes.</i>", chat_id, call.message.message_id, parse_mode="HTML")
-                except Exception:
-                    pass
-                threading.Thread(target=build_apk_task, args=(chat_id, user_id, call.message.message_id), daemon=True).start()
-                return
 
         if data == "act_upload":
             bot.answer_callback_query(call.id)
@@ -2363,7 +1970,7 @@ if bot:
             return
 
         menu_buttons = {
-            "📂 File Sharing Bot", "📱 Website to APK", "📤 Upload File", "📊 Stats", "ℹ️ Help",
+            "📂 File Sharing Bot", "📤 Upload File", "📊 Stats", "ℹ️ Help",
             "🎥 YouTube Downloader", "📹 Facebook Download", "🎵 TikTok Download",
             "📸 Instagram Download", "📌 Pinterest Download",
             "🖼️ Thumbnail Downloader", "📝 Yt Title Tags Extract", "📝 TikTok Title Extract",
@@ -2386,11 +1993,6 @@ if bot:
                     "👇 নিচের বাটন থেকে নির্বাচন করুন অথবা সরাসরি ফাইল পাঠান:"
                 )
                 bot.send_message(chat_id, panel_txt, parse_mode="HTML", reply_markup=get_file_sharing_keyboard())
-                return
-
-            elif text == "📱 Website to APK":
-                notify_admin_log(user, "Website to APK Studio")
-                send_apk_home(chat_id, user.id)
                 return
 
             elif text == "📤 Upload File":
@@ -2750,81 +2352,7 @@ if bot:
         # ==========================================
         state = get_state(user.id)
 
-        # APK Builder States
-        if state in ["apk_step_name", "apk_step_name_rename"]:
-            if text in ["✖️ Cancel", "/cancel"]:
-                clear_state(user.id)
-                APK_SESSIONS.pop(user.id, None)
-                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
-                return
-
-            name_err = validate_app_name(text)
-            if name_err:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-                bot.send_message(chat_id, f"⚠️ <b>ভুল অ্যাপ নাম:</b> {html.escape(name_err)}\n\nদয়া করে সঠিক নাম পাঠান (১-৮০ অক্ষর):", parse_mode="HTML", reply_markup=markup)
-                return
-
-            if state == "apk_step_name_rename":
-                session = APK_SESSIONS.get(user.id)
-                if session:
-                    session["app_name"] = text
-                    clear_state(user.id)
-                    send_apk_confirmation(chat_id, user.id)
-                else:
-                    clear_state(user.id)
-                    bot.send_message(chat_id, "❌ সেশনের মেয়াদ শেষ হয়েছে! আবার শুরু করুন।", reply_markup=get_main_reply_keyboard(user.id))
-                return
-
-            APK_SESSIONS[user.id] = {"app_name": text}
-            set_state(user.id, "apk_step_html")
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-            bot.send_message(
-                chat_id,
-                "<b>Step 2/5 — Website Files</b>\n"
-                "✅  🔵  ⚪  ⚪  ⚪\n\n"
-                f"✅ সংরক্ষিত নাম: <b>{html.escape(text)}</b>\n\n"
-                "📄 <b>আপনার ওয়েবসাইটের ফাইল আপলোড করুন:</b>\n"
-                "একটি <code>.html</code>, <code>.htm</code> অথবা <code>.zip</code> ফাইল ডকুমেন্ট (Document) হিসেবে পাঠান (সর্বোচ্চ 10 MB)।",
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-            return
-
-        elif state == "apk_step_html":
-            if text in ["✖️ Cancel", "/cancel"]:
-                clear_state(user.id)
-                APK_SESSIONS.pop(user.id, None)
-                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
-                return
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-            bot.send_message(
-                chat_id,
-                "⚠️ <b>ডকুমেন্ট ফাইল প্রয়োজন:</b>\n\nদয়া করে আপনার ওয়েবসাইট ফাইলটি ডকুমেন্ট (Document/File) হিসেবে পাঠান (যেমন: <code>index.html</code> অথবা <code>project.zip</code>) বা বাতিল করতে ✖️ Cancel চাপুন।",
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-            return
-
-        elif state == "apk_step_icon":
-            if text in ["✖️ Cancel", "/cancel"]:
-                clear_state(user.id)
-                APK_SESSIONS.pop(user.id, None)
-                bot.send_message(chat_id, "✖️ <b>APK তৈরি বাতিল করা হয়েছে।</b>", parse_mode="HTML", reply_markup=get_main_reply_keyboard(user.id))
-                return
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✖️ Cancel", callback_data="apk:cancel"))
-            bot.send_message(
-                chat_id,
-                "⚠️ <b>ছবি/আইকন প্রয়োজন:</b>\n\nদয়া করে আপনার অ্যাপ আইকনটি ফটো বা ডকুমেন্ট (PNG/JPEG) হিসেবে পাঠান বা বাতিল করতে ✖️ Cancel চাপুন।",
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-            return
-
-        elif state == "admin_upload_cookie" and user.id in ADMIN_IDS:
+        if state == "admin_upload_cookie" and user.id in ADMIN_IDS:
             clear_state(user.id)
             with open("cookies.txt", "w", encoding="utf-8") as f:
                 f.write(text)
