@@ -45,6 +45,8 @@ if not BOT_TOKEN:
     print("❌ CRITICAL ERROR: BOT_TOKEN is missing in Environment Variables!", flush=True)
 
 bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
+if bot:
+    telebot.apihelper.CUSTOM_REQUEST_TIMEOUT = 120
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -195,7 +197,7 @@ FFMPEG_DIR = os.path.abspath("ffmpeg_bin") if os.path.exists("ffmpeg_bin") else 
 HAS_FFMPEG = bool(FFMPEG_DIR or shutil.which("ffmpeg"))
 
 def get_ydl_options(output_path):
-    fmt = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if HAS_FFMPEG else '18/22/b[ext=mp4]/best[ext=mp4]/best'
+    fmt = 'best[height<=720]/bestvideo[height<=720]+bestaudio/18/22/b[ext=mp4]/best' if HAS_FFMPEG else '18/22/b[ext=mp4]/best[ext=mp4]/best'
     opts = {
         'format': fmt,
         'merge_output_format': 'mp4',
@@ -209,7 +211,7 @@ def get_ydl_options(output_path):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web']
+                'player_client': ['android']
             }
         }
     }
@@ -1167,7 +1169,10 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
         status_msg = bot.send_message(user_id, "⏳ <b>ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</b>", parse_mode="HTML")
         msg_id = status_msg.message_id
 
-    target_url = resolve_url(raw_url)
+    u_match = re.search(r'https?://[^\s<>"]+', raw_url)
+    clean_raw = u_match.group(0).rstrip('.,;!?') if u_match else raw_url.strip()
+    target_url = resolve_url(clean_raw)
+
     output_dir = f"downloads/{user_id}_{int(time.time() * 1000)}"
     os.makedirs(output_dir, exist_ok=True)
     out_template = f'{output_dir}/%(id)s.%(ext)s'
@@ -1175,126 +1180,145 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
     video_title = "Social Video"
     downloaded = False
 
-    # Strategy 1: Primary yt-dlp
     try:
-        ydl_opts = get_ydl_options(out_template)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target_url, download=True)
-            if info:
-                video_title = info.get('title') or info.get('description') or "Social Video"
-        files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
-        if files:
-            downloaded = True
-    except Exception as e1:
-        print(f"[!] Primary yt-dlp error: {e1}", flush=True)
-
-    # Strategy 2: Android progressive format (No ffmpeg, no cookies needed)
-    if not downloaded:
+        # Strategy 1: Primary yt-dlp
         try:
-            retry_opts = {
-                'format': '18/22/b[ext=mp4]/best[ext=mp4]/best',
-                'outtmpl': out_template,
-                'quiet': True,
-                'no_warnings': True,
-                'no_check_certificates': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android']
-                    }
-                }
-            }
-            if FFMPEG_DIR:
-                retry_opts['ffmpeg_location'] = FFMPEG_DIR
-            if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
-                retry_opts['cookiefile'] = "cookies.txt"
-            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
-                info2 = ydl_retry.extract_info(target_url, download=True)
-                if info2:
-                    video_title = info2.get('title') or info2.get('description') or "Social Video"
+            ydl_opts = get_ydl_options(out_template)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_url, download=True)
+                if info:
+                    video_title = info.get('title') or info.get('description') or "Social Video"
             files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
             if files:
                 downloaded = True
-        except Exception as e2:
-            print(f"[!] Strategy 2 (Android) error: {e2}", flush=True)
+        except Exception as e1:
+            print(f"[!] Strategy 1 error: {e1}", flush=True)
 
-    # Strategy 3: TV Embedded client retry (Bypasses bot checks)
-    if not downloaded and any(k in target_url.lower() for k in ["youtube.com", "youtu.be"]):
-        try:
-            tv_opts = {
-                'format': '18/22/b[ext=mp4]/best',
-                'outtmpl': out_template,
-                'quiet': True,
-                'no_warnings': True,
-                'no_check_certificates': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['tv_embedded']
+        # Strategy 2: Android progressive format (No ffmpeg, no cookies needed)
+        if not downloaded:
+            try:
+                retry_opts = {
+                    'format': '18/22/b[ext=mp4]/best[ext=mp4]/best',
+                    'outtmpl': out_template,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'no_check_certificates': True,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android']
+                        }
                     }
                 }
-            }
-            if FFMPEG_DIR:
-                tv_opts['ffmpeg_location'] = FFMPEG_DIR
-            with yt_dlp.YoutubeDL(tv_opts) as ydl_tv:
-                info3 = ydl_tv.extract_info(target_url, download=True)
-                if info3:
-                    video_title = info3.get('title') or info3.get('description') or "Social Video"
-            files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
-            if files:
-                downloaded = True
-        except Exception as e3:
-            print(f"[!] Strategy 3 (tv_embedded) error: {e3}", flush=True)
+                if FFMPEG_DIR:
+                    retry_opts['ffmpeg_location'] = FFMPEG_DIR
+                if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
+                    retry_opts['cookiefile'] = "cookies.txt"
+                with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                    info2 = ydl_retry.extract_info(target_url, download=True)
+                    if info2:
+                        video_title = info2.get('title') or info2.get('description') or "Social Video"
+                files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+                if files:
+                    downloaded = True
+            except Exception as e2:
+                print(f"[!] Strategy 2 (Android) error: {e2}", flush=True)
 
-    # If downloaded successfully
-    if downloaded:
-        try:
+        # Strategy 3: TV Embedded client retry (Bypasses bot checks)
+        if not downloaded and any(k in target_url.lower() for k in ["youtube.com", "youtu.be"]):
+            try:
+                tv_opts = {
+                    'format': '18/22/b[ext=mp4]/best',
+                    'outtmpl': out_template,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'no_check_certificates': True,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['tv_embedded']
+                        }
+                    }
+                }
+                if FFMPEG_DIR:
+                    tv_opts['ffmpeg_location'] = FFMPEG_DIR
+                with yt_dlp.YoutubeDL(tv_opts) as ydl_tv:
+                    info3 = ydl_tv.extract_info(target_url, download=True)
+                    if info3:
+                        video_title = info3.get('title') or info3.get('description') or "Social Video"
+                files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+                if files:
+                    downloaded = True
+            except Exception as e3:
+                print(f"[!] Strategy 3 (tv_embedded) error: {e3}", flush=True)
+
+        # If downloaded successfully, deliver to user
+        if downloaded:
             files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
             if files:
                 file_path = files[0]
                 file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
 
                 if file_size_mb > 49.5:
-                    bot.edit_message_text("❌ ভিডিও সাইজ ৫০MB-এর বেশি হওয়ায় টেলিগ্রামে সরাসরি পাঠানো সম্ভব নয়।", user_id, msg_id)
-                else:
-                    escaped_title = html.escape(video_title[:200])
-                    caption_text = (
-                        f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
-                        f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
-                        f"<code>{escaped_title}</code>\n\n"
-                        f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                    bot.edit_message_text(
+                        "❌ <b>ভিডিও সাইজ ৫০MB-এর বেশি!</b>\nটেলিগ্রাম বটের সীমাবদ্ধতার কারণে ৫০MB-এর বেশি ফাইল সরাসরি পাঠানো সম্ভব নয়।",
+                        user_id,
+                        msg_id,
+                        parse_mode="HTML"
                     )
+                    return
+
+                escaped_title = html.escape(video_title[:200])
+                caption_text = (
+                    f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
+                    f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
+                    f"<code>{escaped_title}</code>\n\n"
+                    f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                )
+
+                sent = False
+                try:
                     with open(file_path, 'rb') as vf:
-                        bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True)
+                        bot.send_video(user_id, vf, caption=caption_text, parse_mode="HTML", supports_streaming=True, timeout=120)
+                    sent = True
+                except Exception as send_vid_err:
+                    print(f"[!] send_video failed: {send_vid_err}, retrying with send_document...", flush=True)
+                    try:
+                        with open(file_path, 'rb') as vf:
+                            bot.send_document(user_id, vf, caption=caption_text, parse_mode="HTML", timeout=120)
+                        sent = True
+                    except Exception as send_doc_err:
+                        print(f"[!] send_document failed: {send_doc_err}", flush=True)
+
+                if sent:
                     try:
                         bot.delete_message(user_id, msg_id)
                     except Exception:
                         pass
+                    return
+
+        # Strategy 4: Cobalt fallback
+        try:
+            if fallback_cobalt_download(user_id, target_url, msg_id):
                 return
-        except Exception as send_err:
-            print(f"[!] Error sending video: {send_err}", flush=True)
+        except Exception:
+            pass
 
-    # Strategy 4: Cobalt fallback
-    try:
-        if fallback_cobalt_download(user_id, target_url, msg_id):
+        # Strategy 5: TikTok fallback if it's TikTok
+        if "tiktok.com" in target_url:
+            download_and_send_tiktok(user_id, target_url)
             return
-    except Exception:
-        pass
 
-    # Strategy 5: TikTok fallback if it's TikTok
-    if "tiktok.com" in target_url:
-        download_and_send_tiktok(user_id, target_url)
-        return
+        # If all methods failed
+        try:
+            bot.edit_message_text(
+                "⚠️ <b>ভিডিওটি ডাউনলোড করা সম্ভব হয়নি।</b>\n\n"
+                "অনুগ্রহ করে লিংকটি সঠিক ও পাবলিক কিনা যাচাই করুন অথবা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।",
+                user_id,
+                msg_id,
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
-    # If all methods failed
-    try:
-        bot.edit_message_text(
-            "⚠️ <b>ভিডিওটি ডাউনলোড করা সম্ভব হয়নি।</b>\n\n"
-            "অনুগ্রহ করে লিংকটি সঠিক ও পাবলিক কিনা যাচাই করুন অথবা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।",
-            user_id,
-            msg_id,
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass
     finally:
         if os.path.exists(output_dir):
             try:
