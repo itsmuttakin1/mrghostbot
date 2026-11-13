@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+downloads/*
+!downloads/.gitkeep
+bot_database.db
+.env
+cookies.txt
+.DS_Store
