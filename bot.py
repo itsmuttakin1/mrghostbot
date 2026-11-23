@@ -872,10 +872,11 @@ def get_admin_keyboard():
         types.KeyboardButton("📢 Channel 2 ID", style="primary")
     )
     markup.row(
-        types.KeyboardButton(protect_btn, style="success" if protect else "danger"),
-        types.KeyboardButton(maint_btn, style="danger" if maint else "success")
+        types.KeyboardButton("🔗 Mod Share Link", style="primary"),
+        types.KeyboardButton(protect_btn, style="success" if protect else "danger")
     )
     markup.row(
+        types.KeyboardButton(maint_btn, style="danger" if maint else "success"),
         types.KeyboardButton("🏠 Home", style="primary")
     )
     return markup
@@ -1602,6 +1603,27 @@ if bot:
         parts = message.text.split(maxsplit=1)
         payload = parts[1].strip() if len(parts) > 1 else ""
 
+        if payload in ["mod_apk", "mod", "mod_update"]:
+            mod_text = (
+                "⚠️ <b>SERVER UPDATE IN PROGRESS | সার্ভার আপডেট চলছে</b>\n"
+                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                "🇬🇧 <b>[ENGLISH]</b>\n"
+                "Their server is currently undergoing an update, which is why the Mod APK is temporarily not working. The admin is actively working on remaking the app. To receive the latest update, please stay joined to our official channel and continue using our bot's other features!\n\n"
+                "🇧🇩 <b>[বাংলা]</b>\n"
+                "তাদের সার্ভার আপডেট হওয়ার কারণে বর্তমানে Mod APK কাজ করছে না। এডমিন বিষয়টি নিয়ে কাজ করছেন এবং অ্যাপটি নতুনভাবে তৈরি করছেন। পরবর্তী আপডেট সবার আগে পেতে আমাদের অফিসিয়াল চ্যানেলে যুক্ত থাকুন এবং আমাদের বটের অন্যান্য ফিচার ব্যবহার করুন!\n\n"
+                "🇮🇩 <b>[INDONESIA]</b>\n"
+                "Server mereka sedang dalam pembaruan, itulah sebabnya Mod APK saat ini tidak berfungsi. Admin sedang bekerja keras untuk membuat ulang aplikasi tersebut. Untuk mendapatkan pembaruan terbaru, tetap bergabung di channel resmi kami dan silakan gunakan fitur-fitur bot lainnya!\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"📢 <b>Official Channel:</b> {REQUIRED_CHANNEL}"
+            )
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton("📢 Join Official Channel", url=CHANNEL_URL),
+                types.InlineKeyboardButton("🤖 Explore Bot Features", callback_data="verify_home")
+            )
+            bot.send_message(message.chat.id, mod_text, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
+            return
+
         if payload.startswith("file_") or payload.startswith("f_"):
             if not check_channel_joined(user.id):
                 send_join_prompt(message.chat.id, f"verify_file|{payload}")
@@ -1872,6 +1894,7 @@ if bot:
         if data.startswith("verify_"):
             if not check_channel_joined(user_id):
                 bot.answer_callback_query(call.id, "❌ আপনি এখনো উভয় চ্যানেলে জয়েন করেননি! আগে দুটি চ্যানেলেই জয়েন করে আবার চেষ্টা করুন।", show_alert=True)
+                send_join_prompt(chat_id, "verify_home")
                 return
 
             bot.answer_callback_query(call.id, "✅ উভয় চ্যানেলে জয়েন ভেরিফিকেশন সফল হয়েছে!")
@@ -2065,6 +2088,27 @@ if bot:
                     "(বাতিল করতে 🏠 Home চাপুন)"
                 )
                 bot.send_message(chat_id, msg, parse_mode="HTML")
+                return
+            elif text == "🔗 Mod Share Link":
+                try:
+                    b_info = bot.get_me()
+                    b_username = b_info.username
+                except Exception:
+                    b_username = "mrghost_121_bot"
+                mod_link = f"https://t.me/{b_username}?start=mod_apk"
+                msg = (
+                    "🔗 <b>MOD APK SHARE LINK GENERATED</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    "এই লিংকটি যেকোনো ইউজার বা গ্রুপে শেয়ার করতে পারেন। ব্যবহারকারী এই লিংকে ক্লিক করলে ৩টি ভাষায় (Bangla, English, Indonesia) সার্ভার আপডেট ও অ্যাপ মেকিংয়ের নোটিশ দেখতে পাবে:\n\n"
+                    f"👉 <b>Shareable Deep Link:</b>\n<code>{mod_link}</code>\n\n"
+                    "📌 <i>লিংকটিতে চাপ দিলে স্বয়ংক্রিয়ভাবে কপি হয়ে যাবে।</i>"
+                )
+                markup = types.InlineKeyboardMarkup(row_width=2)
+                markup.add(
+                    types.InlineKeyboardButton("🚀 Test Link", url=mod_link),
+                    types.InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={mod_link}&text=Mod%20APK%20Update%20Notice")
+                )
+                bot.send_message(chat_id, msg, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
                 return
 
             if message.forward_from_chat and message.forward_from_chat.type in ["channel", "supergroup"]:
