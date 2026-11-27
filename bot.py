@@ -3004,13 +3004,11 @@ if bot:
             if ok:
                 new_bal = deduct_user_coins(user.id, CUSTOM_SMS_COST)
                 notify_admin_log(user, f"Custom SMS -> {target_num}")
-                provider_name = html.escape(str(res_data.get("provider") or "Gateway"))
                 bot.edit_message_text(
                     "✅ <b>𝐂𝐔𝐒𝐓𝐎𝐌 𝐒𝐌𝐒 𝐒𝐄𝐍𝐓 𝐒𝐔𝐂𝐂𝐄𝐒𝐒𝐅𝐔𝐋𝐋𝐘!</b>\n"
                     "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
                     f"📱 <b>নম্বর:</b> <code>{html.escape(target_num)}</code>\n"
                     f"💬 <b>মেসেজ:</b> {html.escape(text)}\n"
-                    f"⚡ <b>গেটওয়ে API:</b> {provider_name}\n"
                     f"💸 <b>খরচ:</b> -{CUSTOM_SMS_COST} Coin\n"
                     f"💰 <b>অবশিষ্ট ব্যালেন্স:</b> <b>{new_bal} Coins</b>",
                     chat_id,
