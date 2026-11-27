@@ -23,12 +23,6 @@ import requests
 import phonenumbers
 from phonenumbers import geocoder, carrier, timezone
 from dotenv import load_dotenv
-from locales import (
-    SUPPORTED_LANGS,
-    btn,
-    resolve_button_action,
-    t,
-)
 
 load_dotenv()
 
@@ -84,7 +78,7 @@ HTML_TEMPLATE = """
                 Universal <span class="text-cyan-400">Downloader</span>
             </h1>
             <p class="text-slate-400 mt-2 text-sm md:text-base">
-                Facebook, TikTok, Instagram সহ যেকোনো সোশ্যাল ভিডিও সহজে ডাউনলোড করুন
+                YouTube, Facebook, TikTok, Instagram, Pinterest সহ যেকোনো ভিডিও সহজে ডাউনলোড করুন
             </p>
         </div>
 
@@ -194,12 +188,6 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def is_youtube_or_pinterest(url):
-    if not url:
-        return False
-    low = url.lower()
-    return any(k in low for k in ["youtube.com", "youtu.be", "pinterest.com", "pin.it"])
-
 def resolve_url(url):
     if not url:
         return url
@@ -219,7 +207,7 @@ FFMPEG_DIR = os.path.abspath("ffmpeg_bin") if os.path.exists("ffmpeg_bin") else 
 HAS_FFMPEG = bool(FFMPEG_DIR or shutil.which("ffmpeg"))
 
 def get_ydl_options(output_path):
-    fmt = 'best[height<=720]/bestvideo[height<=720]+bestaudio/b[ext=mp4]/best' if HAS_FFMPEG else 'b[ext=mp4]/best[ext=mp4]/best'
+    fmt = 'best[height<=720]/bestvideo[height<=720]+bestaudio/18/22/b[ext=mp4]/best' if HAS_FFMPEG else '18/22/b[ext=mp4]/best[ext=mp4]/best'
     opts = {
         'format': fmt,
         'merge_output_format': 'mp4',
@@ -232,6 +220,11 @@ def get_ydl_options(output_path):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
         },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android']
+            }
+        }
     }
     if FFMPEG_DIR:
         opts['ffmpeg_location'] = FFMPEG_DIR
@@ -252,8 +245,6 @@ def web_download_api():
     raw_url = data.get('url', '').strip()
     if not raw_url:
         return jsonify({'success': False, 'error': 'কোনো ভিডিও URL দেওয়া হয়নি'}), 400
-    if is_youtube_or_pinterest(raw_url):
-        return jsonify({'success': False, 'error': 'YouTube ও Pinterest ডাউনলোডার রিমুভ করা হয়েছে। TikTok, Facebook বা Instagram লিংক দিন।'}), 400
 
     url = resolve_url(raw_url)
     temp_id = f"web_{int(time.time() * 1000)}"
@@ -320,7 +311,6 @@ def init_db():
                 total_uploads INTEGER DEFAULT 0,
                 coins INTEGER DEFAULT 0,
                 last_daily_bonus TEXT DEFAULT NULL,
-                language TEXT DEFAULT 'bn',
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -330,8 +320,6 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN coins INTEGER DEFAULT 0")
         if "last_daily_bonus" not in cols:
             cursor.execute("ALTER TABLE users ADD COLUMN last_daily_bonus TEXT DEFAULT NULL")
-        if "language" not in cols:
-            cursor.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'bn'")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS files (
@@ -363,12 +351,6 @@ def init_db():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('required_channel_2_id', '')")
         conn.commit()
         conn.close()
-
-def get_user_lang(user_id):
-    return "bn"
-
-def set_user_lang(user_id, lang):
-    pass
 
 def get_setting(key, default=""):
     with db_mutex:
@@ -697,21 +679,27 @@ def check_channel_joined(user_id):
 
     return True
 
-def send_join_prompt(chat_id, callback_action="verify_home", user_id=None):
+def send_join_prompt(chat_id, callback_action="verify_home"):
     # Safety: Never send join prompt to groups, supergroups, or channels
     try:
         if int(chat_id) < 0:
             return
     except Exception:
         pass
-    lang = get_user_lang(user_id or chat_id)
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
-        types.InlineKeyboardButton(t(lang, "join_btn_1", channel=REQUIRED_CHANNEL), url=CHANNEL_URL),
-        types.InlineKeyboardButton(t(lang, "join_btn_2"), url=REQUIRED_CHANNEL_2_URL),
-        types.InlineKeyboardButton(t(lang, "join_btn_verify"), callback_data=callback_action)
+        types.InlineKeyboardButton("📢 ১. Join Main Channel (@mrghost_121)", url=CHANNEL_URL),
+        types.InlineKeyboardButton("📢 ২. Join VIP Channel 2", url=REQUIRED_CHANNEL_2_URL),
+        types.InlineKeyboardButton("✅ Joined Both / Verify Now", callback_data=callback_action)
     )
-    text = t(lang, "join_prompt", channel=REQUIRED_CHANNEL, ch2_url=REQUIRED_CHANNEL_2_URL)
+    text = (
+        "⛔ <b>Access Denied! | প্রবেশাধিকার সংরক্ষিত</b>\n"
+        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+        "❌ বটের যেকোনো টুলস ও ফিচার ব্যবহার করতে হলে আপনাকে <b>উভয় চ্যানেলে</b> অবশ্যই জয়েন থাকতে হবে:\n\n"
+        f"👉 <b>চ্যানেল ১:</b> {REQUIRED_CHANNEL}\n"
+        f"👉 <b>চ্যানেল ২:</b> <a href='{REQUIRED_CHANNEL_2_URL}'>VIP Private Channel</a>\n\n"
+        "উভয় চ্যানেলে জয়েন করার পর নিচের <b>✅ Joined Both / Verify Now</b> বাটনে ক্লিক করুন।"
+    )
     bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
 
 def verify_user_access(message, action_tag="verify_home"):
@@ -720,12 +708,11 @@ def verify_user_access(message, action_tag="verify_home"):
         return False
     user = message.from_user
     register_user(user)
-    lang = get_user_lang(user.id)
 
     if is_banned(user.id):
         bot.send_message(
             message.chat.id,
-            t(lang, "banned_full"),
+            "🚫 <b>Access Denied!</b>\n\nতুমি এই বট থেকে ব্যান করা আছো! Unban করতে এডমিনের সাথে যোগাযোগ করো।",
             parse_mode="HTML"
         )
         return False
@@ -733,13 +720,13 @@ def verify_user_access(message, action_tag="verify_home"):
     if is_maintenance() and user.id not in ADMIN_IDS:
         bot.send_message(
             message.chat.id,
-            t(lang, "maintenance"),
+            "🚧 <b>Bot Under Maintenance!</b>\n\n🔧 সিস্টেম আপগ্রেড চলছে...\n⏳ অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।",
             parse_mode="HTML"
         )
         return False
 
     if not check_channel_joined(user.id):
-        send_join_prompt(message.chat.id, action_tag, user_id=user.id)
+        send_join_prompt(message.chat.id, action_tag)
         return False
 
     return True
@@ -762,128 +749,88 @@ def notify_admin_log(user, tool_name):
 
 
 # ==========================================
-# 4. BULLETPROOF MESSAGE SENDER & KEYBOARDS
+# 4. KEYBOARD MENUS (COLORED BUTTONS)
 # ==========================================
-def safe_send_message(chat_id, text, parse_mode="HTML", reply_markup=None, disable_web_page_preview=None, **kwargs):
-    """
-    Bulletproof message sender:
-    1. Tries sending with requested parse_mode and reply_markup.
-    2. If it fails with HTML parse error (or any other API error), falls back to plain text with markup.
-    3. If reply_markup causes any failure, falls back without reply_markup.
-    """
-    if not bot:
-        return None
-    opts = {}
-    if disable_web_page_preview is not None:
-        opts['disable_web_page_preview'] = disable_web_page_preview
-    opts.update(kwargs)
-
-    # Attempt 1: Standard send with requested parse_mode
-    try:
-        return bot.send_message(chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup, **opts)
-    except Exception as e1:
-        print(f"[!] safe_send_message primary (HTML) failed: {e1}", flush=True)
-
-    # Attempt 2: Plain text with reply_markup (stripping tags and decoding entities)
-    plain_text = re.sub(r'<[^>]+>', '', str(text)).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
-    try:
-        return bot.send_message(chat_id, plain_text, parse_mode=None, reply_markup=reply_markup, **opts)
-    except Exception as e2:
-        print(f"[!] safe_send_message plain fallback failed: {e2}", flush=True)
-
-    # Attempt 3: Plain text without reply_markup (in case reply_markup caused Telegram rejection)
-    try:
-        return bot.send_message(chat_id, plain_text, parse_mode=None, **opts)
-    except Exception as e3:
-        print(f"[!] safe_send_message stripped fallback failed: {e3}", flush=True)
-        return None
-
-def _kb_btn(text, style=None, use_style=False):
-    return types.KeyboardButton(text)
-
-def get_main_reply_keyboard(user_id=None, use_style=False):
-    lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
-
-    # Row 1: File Sharing
+def get_main_reply_keyboard(user_id=None):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    
+    # Row 1: File Sharing (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_file_sharing"))
+        types.KeyboardButton("📂 File Sharing Bot", style="success")
     )
-    # Row 2: Facebook | TikTok
+    # Row 2: Facebook (Blue / Primary) | TikTok (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_fb_dl")),
-        types.KeyboardButton(btn(lang, "btn_tiktok_dl"))
+        types.KeyboardButton("📹 Facebook Download", style="primary"),
+        types.KeyboardButton("🎵 TikTok Download", style="primary")
     )
-    # Row 3: Instagram | Thumbnail
+    # Row 3: Instagram (Red / Danger) | Thumbnail (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_insta_dl")),
-        types.KeyboardButton(btn(lang, "btn_thumb_dl"))
+        types.KeyboardButton("📸 Instagram Download", style="danger"),
+        types.KeyboardButton("🖼️ Thumbnail Downloader", style="success")
     )
-    # Row 4: Image to Link | Live TV
+    # Row 5: Image to Link (Blue / Primary) | Live TV (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_img_link")),
-        types.KeyboardButton(btn(lang, "btn_live_tv"))
+        types.KeyboardButton("🖼️ Image to Link", style="primary"),
+        types.KeyboardButton("📺 Live TV", style="success")
     )
-    # Row 5: Number to Info | QR Maker
+    # Row 6: Number to Info (Green / Success) | QR Maker (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_num_info")),
-        types.KeyboardButton(btn(lang, "btn_qr"))
+        types.KeyboardButton("📞 Number to Info", style="success"),
+        types.KeyboardButton("🔳 Qr Maker", style="primary")
     )
-    # Row 6: Encode & Decode | Link Checker
+    # Row 7: Encode & Decode (Red / Danger) | Link Checker (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_enc_dec")),
-        types.KeyboardButton(btn(lang, "btn_link_check"))
+        types.KeyboardButton("🔐 Encode & Decode", style="danger"),
+        types.KeyboardButton("🛡️ Link Checker", style="success")
     )
-    # Row 7: Title/Tags Extract | TikTok Title Extract
+    # Row 8: Title/Tags Extract (Red / Danger) | TikTok Title Extract (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_yt_extract")),
-        types.KeyboardButton(btn(lang, "btn_tik_title"))
+        types.KeyboardButton("📝 Yt Title Tags Extract", style="danger"),
+        types.KeyboardButton("📝 TikTok Title Extract", style="primary")
     )
-    # Row 8: IP Tracker | WhatsApp
+    # Row 9: IP Tracker (Blue / Primary) | WhatsApp (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_ip_track")),
-        types.KeyboardButton(btn(lang, "btn_wa_open"))
+        types.KeyboardButton("🌍 IP Tracker", style="primary"),
+        types.KeyboardButton("💫 Whatsapp Opener", style="success")
     )
-    # Row 9: Card Maker | NID Tools
+    # Row 10: Card Maker (Blue / Primary) | NID Tools (Red / Danger)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_card_hub")),
-        types.KeyboardButton(btn(lang, "btn_nid"))
+        types.KeyboardButton("🪪 Visa / Master Card Maker", style="primary"),
+        types.KeyboardButton("🆔 BD NID Tools", style="danger")
     )
-    # Row 10: Aadhaar Tools | SMS Bomber
+    # Row 11: Aadhaar Tools (Blue / Primary) | SMS Bomber (Red / Danger)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_aadhaar")),
-        types.KeyboardButton(btn(lang, "btn_sms_bomb"))
+        types.KeyboardButton("🪪 Aadhaar Tools", style="primary"),
+        types.KeyboardButton("⚠️ SMS BOMBER", style="danger")
     )
-    # Row 11: Stats | Help
+    # Row 12: Stats (Blue / Primary) | Help (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_stats")),
-        types.KeyboardButton(btn(lang, "btn_help"))
+        types.KeyboardButton("📊 Stats", style="primary"),
+        types.KeyboardButton("ℹ️ Help", style="success")
     )
     return markup
 
-def get_file_sharing_keyboard(user_id=None, use_style=False):
-    lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
+def get_file_sharing_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_upload_file")),
-        types.KeyboardButton(btn(lang, "btn_stats"))
+        types.KeyboardButton("📤 Upload File", style="primary"),
+        types.KeyboardButton("📊 Stats", style="success")
     )
-    markup.row(types.KeyboardButton(btn(lang, "btn_home")))
+    markup.row(types.KeyboardButton("🏠 Home", style="danger"))
     return markup
 
-def get_visa_menu_keyboard(user_id=None, use_style=False):
-    lang = get_user_lang(user_id) if user_id else "bn"
+def get_visa_menu_keyboard():
     cost = get_card_cost()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_get_card", cost=cost)),
-        types.KeyboardButton(btn(lang, "btn_cc_gen"))
+        types.KeyboardButton(f"💳 Get Card ({cost} Coins)", style="success"),
+        types.KeyboardButton("💳 CC Generator", style="primary")
     )
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_daily_bonus")),
-        types.KeyboardButton(btn(lang, "btn_my_balance"))
+        types.KeyboardButton("🎁 Daily Bonus", style="primary"),
+        types.KeyboardButton("💰 My Balance", style="success")
     )
-    markup.row(types.KeyboardButton(btn(lang, "btn_home")))
+    markup.row(types.KeyboardButton("🏠 Home", style="danger"))
     return markup
 
 def get_admin_keyboard():
@@ -968,22 +915,21 @@ def get_state(user_id):
 def clear_state(user_id):
     USER_STATES.pop(user_id, None)
 
-def send_shared_file_by_code(chat_id, file_code, user_id=None):
-    lang = get_user_lang(user_id or chat_id)
+def send_shared_file_by_code(chat_id, file_code):
     row = get_shared_file(file_code)
     if not row:
         bot.send_message(
             chat_id,
-            t(lang, "fs_not_found"),
+            "❌ <b>ফাইল পাওয়া যায়নি!</b>\nফাইলটি মুছে ফেলা হয়েছে অথবা লিংকটি মেয়াদোত্তীর্ণ।",
             parse_mode="HTML"
         )
         return
 
     file_id, file_type, file_name, caption = row
-    status_m = bot.send_message(chat_id, t(lang, "fs_sending"), parse_mode="HTML")
+    status_m = bot.send_message(chat_id, "⏳ <b>আপনার ফাইল পাঠানো হচ্ছে...</b>", parse_mode="HTML")
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(t(lang, "btn_join_main_ch"), url=CHANNEL_URL))
+    markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
 
     sent_msg = None
     try:
@@ -1000,11 +946,17 @@ def send_shared_file_by_code(chat_id, file_code, user_id=None):
             pass
 
         if sent_msg:
-            notice_text = t(lang, "fs_notice_5min")
+            notice_text = (
+                "⚠️ <b>জরুরী নোটিশ:</b>\n"
+                "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                "কপিরাইট ও নিরাপত্তার স্বার্থে এই ফাইলটি <b>৫ মিনিট (5 mins)</b> পর আপনার ইনবক্স থেকে স্বয়ংক্রিয়ভাবে মুছে যাবে।\n\n"
+                "📌 <i>প্রয়োজনে ফাইলটি এখনই আপনার 'Saved Messages'-এ ফরোয়ার্ড করে রাখুন অথবা ফোনে সেভ করুন।</i>\n"
+                "🔄 <i>(লিংকটি পার্মানেন্ট থাকবে; পরবর্তীতে যেকোনো সময় লিংকে ক্লিক করলেই আবার ফাইলটি পাবেন।)</i>"
+            )
             notice_msg = bot.send_message(chat_id, notice_text, parse_mode="HTML")
 
             # Auto-delete messages from inbox after 5 minutes (300 seconds)
-            def auto_delete_inbox_messages(target_cid, target_mids, msg_lang, delay=300):
+            def auto_delete_inbox_messages(target_cid, target_mids, delay=300):
                 time.sleep(delay)
                 for mid in target_mids:
                     try:
@@ -1014,86 +966,17 @@ def send_shared_file_by_code(chat_id, file_code, user_id=None):
                 try:
                     bot.send_message(
                         target_cid,
-                        t(msg_lang, "fs_deleted_5min"),
-                        parse_mode="HTML"
+                        "⏳ <b>সময় সমাপ্ত!</b>\n৫ মিনিট পূর্ণ হওয়ায় পূর্বের ফাইলটি ইনবক্স থেকে মুছে দেওয়া হয়েছে। পুনরায় ফাইলটি পেতে মূল শেয়ার লিংকে ক্লিক করুন।"
                     )
                 except Exception:
                     pass
 
-            threading.Thread(
-                target=auto_delete_inbox_messages,
-                args=(chat_id, [sent_msg.message_id, notice_msg.message_id], lang, 300),
-                daemon=True
-            ).start()
+            threading.Thread(target=auto_delete_inbox_messages, args=(chat_id, [sent_msg.message_id, notice_msg.message_id], 300), daemon=True).start()
 
     except Exception as e:
-        bot.send_message(chat_id, t(lang, "fs_send_error", err=html.escape(str(e)[:100])), parse_mode="HTML")
+        bot.send_message(chat_id, f"❌ ফাইল পাঠাতে সমস্যা হয়েছে: {str(e)[:100]}")
 
-def extract_clean_title(info, fallback="Social Video"):
-    if not isinstance(info, dict):
-        return fallback
-    candidates = [
-        info.get("fulltitle"),
-        info.get("title"),
-        info.get("description"),
-    ]
-    generic_names = {"facebook", "watch", "instagram", "tiktok", "video", "reel", "reels"}
-    for cand in candidates:
-        if not cand:
-            continue
-        clean_c = " ".join(str(cand).strip().splitlines()).strip()
-        if not clean_c:
-            continue
-        if clean_c.lower() in generic_names:
-            continue
-        return clean_c
-    return fallback
-
-def fetch_video_title_fallback(url, fallback="Social Video"):
-    # 1. Try quick yt-dlp metadata extraction
-    try:
-        meta_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'no_check_certificates': True,
-            'skip_download': True,
-            'source_address': '0.0.0.0',
-        }
-        proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-        if proxy:
-            meta_opts['proxy'] = proxy
-        with yt_dlp.YoutubeDL(meta_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = extract_clean_title(info, fallback="")
-            if title:
-                return title
-    except Exception:
-        pass
-
-    # 2. Try OpenGraph / HTML title
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-        resp = requests.get(url, headers=headers, timeout=8)
-        if resp.status_code == 200 and resp.text:
-            for pattern in [
-                r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<title>([^<]+)</title>',
-            ]:
-                m = re.search(pattern, resp.text, re.IGNORECASE)
-                if m:
-                    raw_t = html.unescape(m.group(1)).strip()
-                    if raw_t and raw_t.lower() not in {"facebook", "instagram", "tiktok", "watch", "log in or sign up to view"}:
-                        return raw_t
-    except Exception:
-        pass
-    return fallback
-
-def fallback_cobalt_download(user_id, url, status_msg_id=None, video_title=None):
-    lang = get_user_lang(user_id)
+def fallback_cobalt_download(user_id, url, status_msg_id=None):
     cobalt_instances = [
         ("https://cobalt-api.kwiatekm.pl/", {"url": url, "videoQuality": "720"}),
         ("https://api.cobalt.tools/", {"url": url, "videoQuality": "720"}),
@@ -1113,26 +996,12 @@ def fallback_cobalt_download(user_id, url, status_msg_id=None, video_title=None)
                 data = res.json()
                 media_url = data.get("url")
                 if media_url:
-                    resolved_title = video_title or data.get("filename") or fetch_video_title_fallback(url, "Social Video")
-                    caption = t(lang, "dl_caption_universal", title=html.escape(str(resolved_title)[:200]))
-                    try:
-                        bot.send_video(user_id, media_url, caption=caption, parse_mode="HTML")
-                    except Exception:
-                        # Download locally if Telegram cannot fetch CDN URL directly
-                        os.makedirs("downloads", exist_ok=True)
-                        temp_file = f"downloads/cb_{user_id}_{int(time.time())}.mp4"
-                        try:
-                            v_res = requests.get(media_url, timeout=30, stream=True)
-                            if v_res.status_code == 200:
-                                with open(temp_file, "wb") as f:
-                                    for chunk in v_res.iter_content(chunk_size=1024*1024):
-                                        if chunk:
-                                            f.write(chunk)
-                                with open(temp_file, "rb") as vf:
-                                    bot.send_video(user_id, vf, caption=caption, parse_mode="HTML", supports_streaming=True)
-                        finally:
-                            if os.path.exists(temp_file):
-                                os.remove(temp_file)
+                    bot.send_video(
+                        user_id,
+                        media_url,
+                        caption="🎬 <b>Video Downloaded Successfully!</b>\n\n⚡ <i>Fast Cloud Stream</i>\n👨‍💻 Powered by @mrghost_121",
+                        parse_mode="HTML"
+                    )
                     if status_msg_id:
                         try:
                             bot.delete_message(user_id, status_msg_id)
@@ -1146,8 +1015,7 @@ def fallback_cobalt_download(user_id, url, status_msg_id=None, video_title=None)
 def download_and_send_tiktok(user_id, raw_url):
     if not bot:
         return
-    lang = get_user_lang(user_id)
-    status_msg = bot.send_message(user_id, t(lang, "dl_processing_tiktok"), parse_mode="HTML")
+    status_msg = bot.send_message(user_id, "⏳ <b>TikTok ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
     url = resolve_url(raw_url)
 
     # Method 1: TikWM (No Watermark HD)
@@ -1160,17 +1028,18 @@ def download_and_send_tiktok(user_id, raw_url):
             author = (data.get("author") or {}).get("nickname") or "Creator"
             music = (data.get("music_info") or {}).get("title") or ""
 
-            caption = t(
-                lang,
-                "dl_caption_tiktok",
-                title=html.escape(title[:250]),
-                author=html.escape(author)
+            caption = (
+                "🎵 <b>𝐓𝐈𝐊𝐓𝐎𝐊 𝐕𝐈𝐃𝐄𝐎 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 <b>Author:</b> <code>{html.escape(author)}</code>\n"
+                f"📝 <b>Caption:</b>\n<code>{html.escape(title[:250])}</code>\n\n"
             )
             if music:
-                caption += t(lang, "dl_caption_music_line", music=html.escape(music[:80]))
-            else:
-                caption += "\n"
-            caption += t(lang, "dl_caption_tiktok_footer")
+                caption += f"🎶 <b>Music:</b> <code>{html.escape(music[:80])}</code>\n\n"
+            caption += (
+                "⚡ <i>Downloaded without Watermark in HD</i>\n"
+                '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+            )
 
             if video_url:
                 v_res = requests.get(video_url, timeout=30, stream=True)
@@ -1203,16 +1072,10 @@ def download_and_send_tiktok(user_id, raw_url):
             video_url = r2["video"].get("noWatermark") or r2["video"].get("watermark")
             title = r2.get("title") or title
         if video_url:
-            caption = t(
-                lang,
-                "dl_caption_tiktok",
-                title=html.escape(title[:220]),
-                author="TikTok"
-            ) + "\n" + t(lang, "dl_caption_tiktok_footer")
             bot.send_video(
                 user_id,
                 video_url,
-                caption=caption,
+                caption=f"🎵 <b>TikTok Video Downloaded</b>\n\n📝 <code>{html.escape(title[:180])}</code>\n⚡ <i>No Watermark</i>\n👨‍💻 Powered by @mrghost_121",
                 parse_mode="HTML"
             )
             try:
@@ -1229,8 +1092,7 @@ def download_and_send_tiktok(user_id, raw_url):
 def download_and_send_instagram(user_id, raw_url):
     if not bot:
         return
-    lang = get_user_lang(user_id)
-    status_msg = bot.send_message(user_id, t(lang, "dl_processing_insta"), parse_mode="HTML")
+    status_msg = bot.send_message(user_id, "⏳ <b>Instagram রিলস/পোস্ট সংগ্রহ ও প্রসেস করা হচ্ছে...</b>", parse_mode="HTML")
     url = resolve_url(raw_url)
 
     # Method 1: Public IG API
@@ -1239,39 +1101,20 @@ def download_and_send_instagram(user_id, raw_url):
         r = requests.get(api_url, timeout=15).json()
         data = r.get("data") or {}
         media_url = data.get("download_url") or data.get("url") or (r.get("media") or [{}])[0].get("url")
+        ig_title = data.get("title") or data.get("caption") or r.get("title") or ""
         if media_url:
-            raw_title = data.get("title") or data.get("caption") or r.get("title")
-            if not raw_title:
-                raw_title = fetch_video_title_fallback(url, "Instagram Video")
-            caption = t(lang, "dl_caption_insta", title=html.escape(str(raw_title)[:200]))
-            is_video = ".mp4" in media_url or "video" in str(data.get("type", "")).lower()
-            try:
-                if is_video:
-                    bot.send_video(user_id, media_url, caption=caption, parse_mode="HTML")
-                else:
-                    bot.send_photo(user_id, media_url, caption=caption, parse_mode="HTML")
-            except Exception:
-                # Download locally if direct URL delivery fails
-                os.makedirs("downloads", exist_ok=True)
-                ext = "mp4" if is_video else "jpg"
-                temp_file = f"downloads/ig_{user_id}_{int(time.time())}.{ext}"
-                try:
-                    m_res = requests.get(media_url, timeout=30, stream=True)
-                    if m_res.status_code == 200:
-                        with open(temp_file, "wb") as f:
-                            for chunk in m_res.iter_content(chunk_size=1024*1024):
-                                if chunk:
-                                    f.write(chunk)
-                        with open(temp_file, "rb") as mf:
-                            if is_video:
-                                bot.send_video(user_id, mf, caption=caption, parse_mode="HTML", supports_streaming=True)
-                            else:
-                                bot.send_photo(user_id, mf, caption=caption, parse_mode="HTML")
-                    else:
-                        raise RuntimeError("IG media download failed")
-                finally:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
+            title_block = f"\n📝 <b>Caption:</b>\n<code>{html.escape(str(ig_title)[:250])}</code>\n" if ig_title else "\n"
+            caption = (
+                "📸 <b>𝐈𝐍𝐒𝐓𝐀𝐆𝐑𝐀𝐌 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+                f"{title_block}\n"
+                "✅ <i>HD Quality Video / Photo</i>\n"
+                '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+            )
+            if ".mp4" in media_url or "video" in str(data.get("type", "")).lower():
+                bot.send_video(user_id, media_url, caption=caption, parse_mode="HTML")
+            else:
+                bot.send_photo(user_id, media_url, caption=caption, parse_mode="HTML")
             try:
                 bot.delete_message(user_id, status_msg.message_id)
             except Exception:
@@ -1284,27 +1127,68 @@ def download_and_send_instagram(user_id, raw_url):
     if fallback_cobalt_download(user_id, url, status_msg.message_id):
         return
 
-    # Method 3: Universal Downloader (yt-dlp with title extraction)
+    # Method 3: Universal Downloader
+    download_and_send_universal_video(user_id, raw_url, status_msg_id=status_msg.message_id)
+
+def download_and_send_pinterest(user_id, raw_url):
+    if not bot:
+        return
+    status_msg = bot.send_message(user_id, "⏳ <b>Pinterest মিডিয়া সংগ্রহ করা হচ্ছে...</b>", parse_mode="HTML")
+    url = resolve_url(raw_url)
+
+    caption = (
+        "📌 <b>𝐏𝐈𝐍𝐓𝐄𝐑𝐄𝐒𝐓 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐃</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ <i>Ultra HD Quality Media</i>\n"
+        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+    )
+
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        html_text = resp.text
+
+        video_match = re.search(r'https://v\.pinimg\.com/videos/[^"\']+\.mp4', html_text) or re.search(r'https://v\.pinimg\.com/[^"\']+\.mp4', html_text)
+        if video_match:
+            v_url = video_match.group(0)
+            bot.send_video(user_id, v_url, caption=caption, parse_mode="HTML")
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+
+        img_match = re.search(r'https://i\.pinimg\.com/originals/[^"\']+\.(?:jpg|png|jpeg|gif)', html_text)
+        if not img_match:
+            img_match = re.search(r'https://i\.pinimg\.com/736x/[^"\']+\.(?:jpg|png|jpeg|gif)', html_text)
+        if img_match:
+            img_url = img_match.group(0)
+            bot.send_photo(user_id, img_url, caption=caption, parse_mode="HTML")
+            try:
+                bot.delete_message(user_id, status_msg.message_id)
+            except Exception:
+                pass
+            return
+    except Exception as e:
+        print(f"[!] Pinterest direct scraper error: {e}", flush=True)
+
+    # Method 2: Cobalt fallback
+    if fallback_cobalt_download(user_id, url, status_msg.message_id):
+        return
+
+    # Method 3: Universal Downloader
     download_and_send_universal_video(user_id, raw_url, status_msg_id=status_msg.message_id)
 
 def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
     if not bot:
         return
-    lang = get_user_lang(user_id)
-    if is_youtube_or_pinterest(raw_url):
-        if status_msg_id:
-            try:
-                bot.edit_message_text(t(lang, "dl_unsupported_removed"), user_id, status_msg_id, parse_mode="HTML")
-            except Exception:
-                bot.send_message(user_id, t(lang, "dl_unsupported_removed"), parse_mode="HTML")
-        else:
-            bot.send_message(user_id, t(lang, "dl_unsupported_removed"), parse_mode="HTML")
-        return
-
     if status_msg_id:
         msg_id = status_msg_id
     else:
-        status_msg = bot.send_message(user_id, t(lang, "dl_processing_video"), parse_mode="HTML")
+        status_msg = bot.send_message(user_id, "⏳ <b>ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</b>", parse_mode="HTML")
         msg_id = status_msg.message_id
 
     u_match = re.search(r'https?://[^\s<>"]+', raw_url)
@@ -1325,23 +1209,28 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(target_url, download=True)
                 if info:
-                    video_title = extract_clean_title(info, "Social Video")
+                    video_title = info.get('title') or info.get('description') or "Social Video"
             files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
             if files:
                 downloaded = True
         except Exception as e1:
             print(f"[!] Strategy 1 error: {e1}", flush=True)
 
-        # Strategy 2: Progressive MP4 fallback (No ffmpeg needed)
+        # Strategy 2: Android progressive format (No ffmpeg, no cookies needed)
         if not downloaded:
             try:
                 retry_opts = {
-                    'format': 'b[ext=mp4]/best[ext=mp4]/best',
+                    'format': '18/22/b[ext=mp4]/best[ext=mp4]/best',
                     'outtmpl': out_template,
                     'quiet': True,
                     'no_warnings': True,
                     'no_check_certificates': True,
                     'source_address': '0.0.0.0',
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android']
+                        }
+                    }
                 }
                 if FFMPEG_DIR:
                     retry_opts['ffmpeg_location'] = FFMPEG_DIR
@@ -1353,12 +1242,43 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                 with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
                     info2 = ydl_retry.extract_info(target_url, download=True)
                     if info2:
-                        video_title = extract_clean_title(info2, "Social Video")
+                        video_title = info2.get('title') or info2.get('description') or "Social Video"
                 files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
                 if files:
                     downloaded = True
             except Exception as e2:
-                print(f"[!] Strategy 2 error: {e2}", flush=True)
+                print(f"[!] Strategy 2 (Android) error: {e2}", flush=True)
+
+        # Strategy 3: TV Embedded client retry (Bypasses bot checks)
+        if not downloaded and any(k in target_url.lower() for k in ["youtube.com", "youtu.be"]):
+            try:
+                tv_opts = {
+                    'format': '18/22/b[ext=mp4]/best',
+                    'outtmpl': out_template,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'no_check_certificates': True,
+                    'source_address': '0.0.0.0',
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['tv_embedded']
+                        }
+                    }
+                }
+                if FFMPEG_DIR:
+                    tv_opts['ffmpeg_location'] = FFMPEG_DIR
+                proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+                if proxy:
+                    tv_opts['proxy'] = proxy
+                with yt_dlp.YoutubeDL(tv_opts) as ydl_tv:
+                    info3 = ydl_tv.extract_info(target_url, download=True)
+                    if info3:
+                        video_title = info3.get('title') or info3.get('description') or "Social Video"
+                files = [f for f in glob.glob(f"{output_dir}/*") if not f.endswith(('.temp', '.part', '.ytdl'))]
+                if files:
+                    downloaded = True
+            except Exception as e3:
+                print(f"[!] Strategy 3 (tv_embedded) error: {e3}", flush=True)
 
         # If downloaded successfully, deliver to user
         if downloaded:
@@ -1369,17 +1289,20 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
 
                 if file_size_mb > 49.5:
                     bot.edit_message_text(
-                        t(lang, "dl_too_large"),
+                        "❌ <b>ভিডিও সাইজ ৫০MB-এর বেশি!</b>\nটেলিগ্রাম বটের সীমাবদ্ধতার কারণে ৫০MB-এর বেশি ফাইল সরাসরি পাঠানো সম্ভব নয়।",
                         user_id,
                         msg_id,
                         parse_mode="HTML"
                     )
                     return
 
-                if video_title == "Social Video":
-                    video_title = fetch_video_title_fallback(target_url, "Social Video")
                 escaped_title = html.escape(video_title[:200])
-                caption_text = t(lang, "dl_caption_universal", title=escaped_title)
+                caption_text = (
+                    f"✅ <b>ডাউনলোড সফল হয়েছে! (১০০% ফ্রি)</b>\n\n"
+                    f"📝 <b>ক্যাপশন (ক্লিক করলে কপি হবে):</b>\n"
+                    f"<code>{escaped_title}</code>\n\n"
+                    f'⚡ Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
+                )
 
                 sent = False
                 try:
@@ -1402,14 +1325,14 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
                         pass
                     return
 
-        # Strategy 3: Cobalt fallback
+        # Strategy 4: Cobalt fallback
         try:
             if fallback_cobalt_download(user_id, target_url, msg_id):
                 return
         except Exception:
             pass
 
-        # Strategy 4: TikTok fallback if it's TikTok
+        # Strategy 5: TikTok fallback if it's TikTok
         if "tiktok.com" in target_url:
             download_and_send_tiktok(user_id, target_url)
             return
@@ -1417,7 +1340,8 @@ def download_and_send_universal_video(user_id, raw_url, status_msg_id=None):
         # If all methods failed
         try:
             bot.edit_message_text(
-                t(lang, "dl_failed"),
+                "⚠️ <b>ভিডিওটি ডাউনলোড করা সম্ভব হয়নি।</b>\n\n"
+                "অনুগ্রহ করে লিংকটি সঠিক ও পাবলিক কিনা যাচাই করুন অথবা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।",
                 user_id,
                 msg_id,
                 parse_mode="HTML"
@@ -1669,10 +1593,9 @@ if bot:
         user = message.from_user
         clear_state(user.id)
         is_new = register_user(user)
-        lang = get_user_lang(user.id)
 
         if is_banned(user.id):
-            bot.send_message(message.chat.id, t(lang, "banned_short"), parse_mode="HTML")
+            bot.send_message(message.chat.id, "🚫 তুমি এই বট থেকে ব্যান করা আছো!")
             return
 
         parts = message.text.split(maxsplit=1)
@@ -1701,15 +1624,15 @@ if bot:
 
         if payload.startswith("file_") or payload.startswith("f_"):
             if not check_channel_joined(user.id):
-                send_join_prompt(message.chat.id, f"verify_file|{payload}", user_id=user.id)
+                send_join_prompt(message.chat.id, f"verify_file|{payload}")
                 return
-            send_shared_file_by_code(message.chat.id, payload, user_id=user.id)
+            send_shared_file_by_code(message.chat.id, payload)
             return
 
         if is_maintenance() and user.id not in ADMIN_IDS:
             bot.send_message(
                 message.chat.id,
-                t(lang, "maintenance"),
+                "⚠️ <b>BOT UNDER MAINTENANCE</b>\n\nবটটি বর্তমানে মেইনটেইন্যান্সে রয়েছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।",
                 parse_mode="HTML"
             )
             return
@@ -1718,7 +1641,7 @@ if bot:
             notify_admin_log(user, "MR GHOST BOT STARTED (New User)")
 
         if not check_channel_joined(user.id):
-            send_join_prompt(message.chat.id, "verify_home", user_id=user.id)
+            send_join_prompt(message.chat.id, "verify_home")
             return
 
         # 1. Send Start Photo First (Protected content based on Admin setting, not forwarded)
@@ -1730,9 +1653,25 @@ if bot:
             except Exception as e:
                 print(f"[!] Start photo send error: {e}", flush=True)
 
-        # 2. Send Stylish Welcome Message with Persistent Menu Keyboard
-        welcome_text = t(lang, "welcome")
-        safe_send_message(
+        # 2. Send Stylish Welcome Message
+        welcome_text = (
+            "👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 𝐔𝐓𝐈𝐋𝐈𝐓𝐘 𝐁𝐎𝐓!</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+            "🌐 আমাদের বটটি একটি <b>100% Free Public Utility &amp; Video Downloader Bot</b>।\n"
+            "কোনো লিমিট বা চার্জ ছাড়াই সকল টুলস এবং ডাউনলোডার আনলিমিটেড ব্যবহার করুন!\n\n"
+            "⚡ <b>অটো ভিডিও ডাউনলোডার:</b>\n"
+            "সরাসরি চ্যাটে <b>TikTok, Facebook বা Instagram</b> লিংক পাঠালেই বট অটোমেটিক ভিডিও ও টাইটেলসহ ডাউনলোড করে দেবে!\n\n"
+            "✨ <b>জনপ্রিয় ফিচারসমূহ:</b>\n"
+            "• 🎬 Auto Video Downloader (TikTok, Facebook, Instagram)\n"
+            "• 🖼️ Image to Direct Link (ImgBB Hosting)\n"
+            "• 📺 Live TV Streaming Hub\n"
+            "• 🔐 Encode &amp; Decode Suite (Base64, URL, Hex, Binary)\n"
+            "• 🛡️ Real-time Link &amp; Phishing Checker\n"
+            "• 📞 Phone Number to Information Lookup\n\n"
+            "⚠️ <b>জরুরী নোটিশ:</b> বটটি সম্পূর্ণ বৈধ ও গঠনমূলক কাজে ব্যবহার করুন।\n"
+            "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
+        )
+        bot.send_message(
             message.chat.id,
             welcome_text,
             parse_mode="HTML",
@@ -1743,14 +1682,33 @@ if bot:
     def handle_help(message):
         if message.chat.type != "private":
             return
-        lang = get_user_lang(message.from_user.id)
-        help_text = t(lang, "help_text")
+        help_text = (
+            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 &amp; 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
+            "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+            "<b>Available Free Tools:</b>\n"
+            "• 📥 Auto Video Downloader (TikTok, Facebook, Instagram)\n"
+            "• 🖼️ Image to Link (ImgBB Direct Hosting)\n"
+            "• 📺 Live TV Streaming Player\n"
+            "• 📂 File Sharing &amp; Cloud Link Generator\n"
+            "• 🖼️ YouTube Thumbnail &amp; Title/Tags Extractor\n"
+            "• 🎵 TikTok Video &amp; Title Extractor (No Watermark)\n"
+            "• 📞 Phone Number to Info &amp; IP Location Tracker\n"
+            "• 💫 Direct WhatsApp Chat Opener\n"
+            "• 🔳 QR Code Generator &amp; CC/BIN Generator\n"
+            "• 🔐 Built-in Encode/Decode &amp; Link Security Checker\n"
+            "• 🆔 BD NID &amp; Aadhaar Resources\n\n"
+            "<b>Bot Commands:</b>\n"
+            "/start - Start or restart the bot\n"
+            "/help - View this help menu\n\n"
+            "<b>Channel Requirement:</b>\n"
+            "আমাদের অফিসিয়াল চ্যানেলে (@mrghost_121) যুক্ত থাকতে হবে।"
+        )
         markup = types.InlineKeyboardMarkup()
         markup.add(
-            types.InlineKeyboardButton(t(lang, "help_btn_channel"), url=CHANNEL_URL),
-            types.InlineKeyboardButton(t(lang, "help_btn_support"), url="https://t.me/helpghotsteam")
+            types.InlineKeyboardButton("📢 Join Channel", url=CHANNEL_URL),
+            types.InlineKeyboardButton("💬 Contact Support", url="https://t.me/helpghotsteam")
         )
-        safe_send_message(message.chat.id, help_text, parse_mode="HTML", reply_markup=markup)
+        bot.send_message(message.chat.id, help_text, parse_mode="HTML", reply_markup=markup)
 
     @bot.message_handler(commands=['banlist'])
     def handle_banlist_cmd(message):
@@ -1826,7 +1784,6 @@ if bot:
             return
         user_id = message.from_user.id
         state = get_state(user_id)
-        lang = get_user_lang(user_id)
 
         # Admin uploading cookies.txt
         if user_id in ADMIN_IDS and message.document and (state == "admin_upload_cookie" or message.document.file_name == "cookies.txt"):
@@ -1836,7 +1793,7 @@ if bot:
                 downloaded = bot.download_file(file_info.file_path)
                 with open("cookies.txt", "wb") as f:
                     f.write(downloaded)
-                bot.reply_to(message, "✅ <b>cookies.txt সফলভাবে আপডেট করা হয়েছে!</b>\nকুকিজ সক্রিয় থাকবে।", parse_mode="HTML")
+                bot.reply_to(message, "✅ <b>cookies.txt সফলভাবে আপডেট করা হয়েছে!</b>\nএখন ইউটিউব ডাউনলোড কুকিজ সক্রিয় থাকবে।", parse_mode="HTML")
             except Exception as e:
                 bot.reply_to(message, f"❌ কুকিজ ফাইল সেভ করতে ব্যর্থ: {e}")
             return
@@ -1844,7 +1801,7 @@ if bot:
         # Image to Link State
         if state == "awaiting_imgbb_photo" and message.photo:
             clear_state(user_id)
-            wait_m = bot.send_message(message.chat.id, t(lang, "imgbb_uploading"), parse_mode="HTML")
+            wait_m = bot.send_message(message.chat.id, "⏳ <b>ImgBB সার্ভারে ছবি আপলোড করা হচ্ছে...</b>", parse_mode="HTML")
             try:
                 file_info = bot.get_file(message.photo[-1].file_id)
                 file_bytes = bot.download_file(file_info.file_path)
@@ -1852,23 +1809,29 @@ if bot:
                 if res.get("success"):
                     direct_url = res["url"]
                     display_url = res["display_url"]
+                    delete_url = res["delete_url"]
                     size_kb = res["size"]
 
                     markup = types.InlineKeyboardMarkup()
-                    markup.add(types.InlineKeyboardButton(t(lang, "imgbb_btn_open"), url=direct_url))
+                    markup.add(types.InlineKeyboardButton("🌐 Open Direct Image", url=direct_url))
 
-                    out_txt = t(
-                        lang,
-                        "imgbb_success",
-                        direct_url=direct_url,
-                        display_url=display_url,
-                        size_kb=size_kb
+                    out_txt = (
+                        "✅ <b>𝐈𝐌𝐀𝐆𝐄 𝐔𝐏𝐋𝐎𝐀𝐃𝐄𝐃 𝐒𝐔𝐂𝐂𝐄𝐒𝐒𝐅𝐔𝐋𝐋𝐘!</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"🔗 <b>Direct Link (ক্লিক করলেই কপি হবে):</b>\n"
+                        f"<code>{direct_url}</code>\n\n"
+                        f"👁️ <b>Viewer URL:</b>\n"
+                        f"<code>{display_url}</code>\n\n"
+                        f"📦 <b>File Size:</b> {size_kb} KB\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        "⚡ <i>Hosted permanently on ImgBB</i>\n"
+                        '👨‍💻 Powered by <a href="https://t.me/mrghost_121">Mr Ghost</a>'
                     )
                     bot.edit_message_text(out_txt, message.chat.id, wait_m.message_id, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=False)
                 else:
-                    bot.edit_message_text(t(lang, "imgbb_fail", err=html.escape(str(res.get('error')))), message.chat.id, wait_m.message_id, parse_mode="HTML")
+                    bot.edit_message_text(f"❌ <b>আপলোড ব্যর্থ হয়েছে:</b> {res.get('error')}", message.chat.id, wait_m.message_id, parse_mode="HTML")
             except Exception as e:
-                bot.edit_message_text(t(lang, "imgbb_err", err=html.escape(str(e))), message.chat.id, wait_m.message_id, parse_mode="HTML")
+                bot.edit_message_text(f"❌ ছবি প্রসেস করতে সমস্যা হয়েছে: {e}", message.chat.id, wait_m.message_id)
             return
 
         if not verify_user_access(message, "verify_upload"):
@@ -1902,16 +1865,16 @@ if bot:
         bot_username = bot.get_me().username
         share_link = f"https://t.me/{bot_username}?start={unique_code}"
 
-        msg = t(
-            lang,
-            "fs_uploaded",
-            fname=html.escape(file_name),
-            code=unique_code,
-            link=share_link
+        msg = (
+            "✅ <b>ফাইল সফলভাবে আপলোড হয়েছে!</b>\n\n"
+            f"📁 <b>নাম:</b> <code>{html.escape(file_name)}</code>\n"
+            f"📂 <b>File Code:</b> <code>{unique_code}</code>\n\n"
+            f"🔗 <b>শেয়ার লিংক:</b>\n{share_link}\n\n"
+            "<i>এই লিংকে ক্লিক করলে চ্যানেলে জয়েন ভেরিফাই করে যে কেউ ফাইলটি পেয়ে যাবে।</i>"
         )
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton(t(lang, "fs_btn_upload_more"), callback_data="act_upload"))
-        markup.add(types.InlineKeyboardButton(t(lang, "fs_btn_main_menu"), callback_data="verify_home"))
+        markup.add(types.InlineKeyboardButton("📤 আরও আপলোড করুন", callback_data="act_upload"))
+        markup.add(types.InlineKeyboardButton("🏠 মেইন মেনু", callback_data="verify_home"))
         bot.reply_to(message, msg, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
 
     # ==========================================
@@ -1924,15 +1887,14 @@ if bot:
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         data = call.data
-        lang = get_user_lang(user_id)
 
         if data.startswith("verify_"):
             if not check_channel_joined(user_id):
-                bot.answer_callback_query(call.id, t(lang, "verify_not_joined_alert"), show_alert=True)
-                send_join_prompt(chat_id, "verify_home", user_id=user_id)
+                bot.answer_callback_query(call.id, "❌ আপনি এখনো উভয় চ্যানেলে জয়েন করেননি! আগে দুটি চ্যানেলেই জয়েন করে আবার চেষ্টা করুন।", show_alert=True)
+                send_join_prompt(chat_id, "verify_home")
                 return
 
-            bot.answer_callback_query(call.id, t(lang, "verify_success_alert"))
+            bot.answer_callback_query(call.id, "✅ উভয় চ্যানেলে জয়েন ভেরিফিকেশন সফল হয়েছে!")
             try:
                 bot.delete_message(chat_id, call.message.message_id)
             except Exception:
@@ -1940,19 +1902,19 @@ if bot:
 
             if data.startswith("verify_file|"):
                 file_code = data.split("|", 1)[1]
-                send_shared_file_by_code(chat_id, file_code, user_id=user_id)
+                send_shared_file_by_code(chat_id, file_code)
             else:
-                safe_send_message(
+                bot.send_message(
                     chat_id,
-                    t(lang, "verify_success_msg"),
+                    "✅ <b>ভেরিফিকেশন সফল হয়েছে!</b>\nনিচের মেনু থেকে যেকোনো টুলস ব্যবহার করুন 👇",
                     parse_mode="HTML",
                     reply_markup=get_main_reply_keyboard(user_id)
                 )
             return
 
         if not check_channel_joined(user_id):
-            bot.answer_callback_query(call.id, t(lang, "verify_need_join_short"), show_alert=True)
-            send_join_prompt(chat_id, "verify_home", user_id=user_id)
+            bot.answer_callback_query(call.id, "⚠️ আগে উভয় চ্যানেলে জয়েন করুন!", show_alert=True)
+            send_join_prompt(chat_id, "verify_home")
             return
 
         if data == "act_upload":
@@ -1960,7 +1922,7 @@ if bot:
             set_state(user_id, "awaiting_file_upload")
             bot.send_message(
                 chat_id,
-                t(lang, "fs_ask_upload"),
+                "📤 <b>যেকোনো ফাইল পাঠান:</b>\n\nআপনি Document, Video বা Photo পাঠাতে পারেন। বট স্বয়ংক্রিয়ভাবে একটি ইউনিক শেয়ার লিংক বানিয়ে দেবে।",
                 parse_mode="HTML"
             )
             return
@@ -1984,7 +1946,7 @@ if bot:
             set_state(user_id, f"run_op|{data}")
             bot.send_message(
                 chat_id,
-                t(lang, "enc_selected", title=title),
+                f"📝 <b>Selected: {title}</b>\n\nযে টেক্সটটিকে কনভার্ট করতে চান তা নিচে লিখে পাঠান 👇",
                 parse_mode="HTML"
             )
             return
@@ -1993,7 +1955,7 @@ if bot:
             bot.answer_callback_query(call.id)
             bot.send_message(
                 chat_id,
-                t(lang, "enc_menu_short"),
+                "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nনিচের অপশন থেকে সিলেক্ট করুন 👇",
                 parse_mode="HTML",
                 reply_markup=get_encode_decode_keyboard()
             )
@@ -2009,10 +1971,8 @@ if bot:
         user = message.from_user
         text = message.text.strip()
         chat_id = message.chat.id
-        register_user(user)
-        lang = get_user_lang(user.id)
 
-        if resolve_button_action(text) == "btn_home":
+        if text in ["🏠 Home", "🏠 Main Menu", "🔙 Back to Main Menu", "🔙 মেইন মেনু"]:
             clear_state(user.id)
             handle_start(message)
             return
@@ -2158,217 +2118,366 @@ if bot:
         if not verify_user_access(message, "verify_home"):
             return
 
-        action = resolve_button_action(text)
+        menu_buttons = {
+            "📂 File Sharing Bot", "📤 Upload File", "📊 Stats", "ℹ️ Help",
+            "📹 Facebook Download", "🎵 TikTok Download",
+            "📸 Instagram Download",
+            "🖼️ Thumbnail Downloader", "📝 Yt Title Tags Extract", "📝 TikTok Title Extract",
+            "🖼️ Image to Link", "📺 Live TV",
+            "📞 Number to Info", "🔳 Qr Maker",
+            "🔐 Encode & Decode", "🛡️ Link Checker",
+            "🌍 IP Tracker", "💫 Whatsapp Opener", "🪪 Visa / Master Card Maker",
+            "💳 CC Generator", "💳 Get Free Card", "🎁 Daily Bonus", "💰 My Balance",
+            "🆔 BD NID Tools", "🪪 Aadhaar Tools", "⚠️ SMS BOMBER"
+        }
 
-        if action:
+        if text in menu_buttons or text.startswith("💳 Get Card"):
             clear_state(user.id)
 
-            if action == "btn_file_sharing":
-                bot.send_message(chat_id, t(lang, "fs_panel"), parse_mode="HTML", reply_markup=get_file_sharing_keyboard(user.id))
+            if text == "📂 File Sharing Bot":
+                panel_txt = (
+                    "📂 <b>𝐅𝐈𝐋𝐄 𝐒𝐇𝐀𝐑𝐈𝐍𝐆 𝐒𝐘𝐒𝐓𝐄𝐌 — 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "⚡ এখানে আপনি যেকোনো Document, Photo বা Video আপলোড করে শেয়ার লিংক বানাতে পারবেন (১০০% ফ্রি)।\n\n"
+                    "👇 নিচের বাটন থেকে নির্বাচন করুন অথবা সরাসরি ফাইল পাঠান:"
+                )
+                bot.send_message(chat_id, panel_txt, parse_mode="HTML", reply_markup=get_file_sharing_keyboard())
                 return
 
-            elif action == "btn_upload_file":
+            elif text == "📤 Upload File":
                 set_state(user.id, "awaiting_file_upload")
-                bot.send_message(chat_id, t(lang, "fs_ask_upload"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "📤 <b>যেকোনো ফাইল পাঠান:</b>\n\nআপনি Document, Video বা Photo পাঠাতে পারেন। বট স্বয়ংক্রিয়ভাবে একটি ইউনিক শেয়ার লিংক বানিয়ে দেবে।",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_stats":
-                _, user_up, _ = get_user_stats(user.id)
+            elif text == "📊 Stats":
+                _, user_up, total_f = get_user_stats(user.id)
                 user_coins = get_user_coins(user.id)
-                stats_msg = t(
-                    lang,
-                    "stats_msg",
-                    name=html.escape(user.first_name or "User"),
-                    uid=user.id,
-                    uname=user.username or "N/A",
-                    uploads=user_up,
-                    coins=user_coins
+                stats_msg = (
+                    "📊 <b>𝐔𝐒𝐄𝐑 𝐀𝐂𝐂𝐎𝐔𝐍𝐓 𝐒𝐓𝐀𝐓𝐈𝐒𝐓𝐈𝐂𝐒</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "👤 <b>ব্যবহারকারীর তথ্য:</b>\n"
+                    f"• নাম: <b>{html.escape(user.first_name or 'User')}</b>\n"
+                    f"• আইডি: <code>{user.id}</code>\n"
+                    f"• ইউজারনেম: @{user.username or 'N/A'}\n\n"
+                    "📈 <b>অ্যাক্টিভিটি ও স্ট্যাটাস:</b>\n"
+                    "• সাবস্ক্রিপশন: <b>Free Lifetime Access ⚡</b>\n"
+                    f"• আপনার আপলোডকৃত ফাইল: <b>{user_up}</b> টি\n"
+                    f"• আপনার কয়েন ব্যালেন্স: <b>{user_coins} Coins 💰</b>\n"
+                    "• ক্লাউড স্টোরেজ: <b>Unlimited Storage</b>\n\n"
+                    "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
                 )
                 markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton(t(lang, "btn_join_main_ch"), url=CHANNEL_URL))
-                markup.add(types.InlineKeyboardButton(t(lang, "btn_join_vip_ch"), url=REQUIRED_CHANNEL_2_URL))
-                markup.add(types.InlineKeyboardButton(t(lang, "btn_upload_new_file"), callback_data="act_upload"))
+                markup.add(types.InlineKeyboardButton("📢 Join Main Channel", url=CHANNEL_URL))
+                markup.add(types.InlineKeyboardButton("📢 Join VIP Channel 2", url=REQUIRED_CHANNEL_2_URL))
+                markup.add(types.InlineKeyboardButton("📤 Upload New File", callback_data="act_upload"))
                 bot.send_message(chat_id, stats_msg, parse_mode="HTML", reply_markup=markup)
                 return
 
-            elif action == "btn_help":
+            elif text == "ℹ️ Help":
                 handle_help(message)
                 return
 
-            elif action == "btn_fb_dl":
+            elif text == "📹 Facebook Download":
                 notify_admin_log(user, "Facebook Downloader")
                 set_state(user.id, "awaiting_video_url")
-                bot.send_message(chat_id, t(lang, "ask_fb_url"), parse_mode="HTML")
+                bot.send_message(chat_id, "📹 <b>Facebook Video &amp; Reels Downloader</b>\n\nআপনার ফেসবুক ভিডিও বা রিলস (Reels) লিংকটি পাঠান 👇", parse_mode="HTML")
                 return
 
-            elif action == "btn_tiktok_dl":
+            elif text == "🎵 TikTok Download":
                 notify_admin_log(user, "TikTok Downloader")
                 set_state(user.id, "awaiting_tiktok_url")
-                bot.send_message(chat_id, t(lang, "ask_tiktok_url"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🎵 <b>TikTok Video Downloader (No Watermark)</b>\n\nসরাসরি চ্যাটে আপনার কাঙ্ক্ষিত TikTok ভিডিওর লিংক পাঠান 👇",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_insta_dl":
+            elif text == "📸 Instagram Download":
                 notify_admin_log(user, "Instagram Downloader")
                 set_state(user.id, "awaiting_insta_url")
-                bot.send_message(chat_id, t(lang, "ask_insta_url"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "📸 <b>Instagram Video &amp; Reels Downloader</b>\n\nআপনার ইনস্টাগ্রাম রিলস, ভিডিও বা পোস্টের লিংক পাঠান 👇",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_thumb_dl":
+            elif text == "🖼️ Thumbnail Downloader":
                 notify_admin_log(user, "Thumbnail Downloader")
                 set_state(user.id, "awaiting_yt_thumb")
-                bot.send_message(chat_id, t(lang, "ask_yt_thumb"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🖼️ <b>YouTube Thumbnail Downloader</b>\n\nদয়া করে আপনার কাঙ্ক্ষিত ইউটিউব ভিডিওর লিংকটি এখানে পাঠান:\n<i>উদাহরণ: https://youtu.be/xxxxxx</i>",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_img_link":
+            elif text == "🖼️ Image to Link":
                 notify_admin_log(user, "Image to Link")
                 set_state(user.id, "awaiting_imgbb_photo")
-                bot.send_message(chat_id, t(lang, "ask_imgbb"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🖼️ <b>𝐈𝐌𝐀𝐆𝐄 𝐓𝐎 𝐔𝐑𝐋 𝐇𝐎𝐒𝐓𝐈𝐍𝐆 (𝐈𝐦𝐠𝐁𝐁)</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "📸 <b>আপনার ছবিটি এখানে পাঠান (Photo হিসেবে):</b>\n\n"
+                    "⚡ বট সরাসরি ImgBB সার্ভারে আপলোড করে আপনাকে পার্মানেন্ট <b>Direct Image Link</b> বানিয়ে দেবে।\n"
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_live_tv":
+            elif text == "📺 Live TV":
                 notify_admin_log(user, "Live TV")
+                tv_text = (
+                    "📺 <b>𝐋𝐈𝐕𝐄 𝐓𝐕 𝐒𝐓𝐑𝐄𝐀𝐌𝐈𝐍𝐆 𝐇𝐔𝐁</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🌐 <b>অনলাইন লাইভ টিভি লিংক:</b>\n"
+                    "👉 https://mboxofficial.vercel.app/\n\n"
+                    "⚠️ <b>দৃষ্টি আকর্ষণ / জরুরী নোটিশ:</b>\n"
+                    "এই লিংকটি অনলাইনে সরাসরি যেকোনো ব্রাউজারে ব্যবহার করা যায়, তবে অ্যাপ ছাড়া অনেকগুলো টিভি চ্যানেল কাজ নাও করতে পারে। তাই নিরবচ্ছিন্ন বিনোদনের জন্য তাদের অফিসিয়াল <b>App ব্যবহার করুন</b>।\n"
+                    "━━━━━━━━━━━━━━━━━━━━"
+                )
                 markup = types.InlineKeyboardMarkup()
                 markup.add(
-                    types.InlineKeyboardButton(t(lang, "live_tv_btn_open"), url="https://mboxofficial.vercel.app/"),
-                    types.InlineKeyboardButton(t(lang, "live_tv_btn_ch"), url=CHANNEL_URL)
+                    types.InlineKeyboardButton("🌐 Open Live TV", url="https://mboxofficial.vercel.app/"),
+                    types.InlineKeyboardButton("📢 Official Channel", url=CHANNEL_URL)
                 )
-                bot.send_message(chat_id, t(lang, "live_tv_msg"), parse_mode="HTML", reply_markup=markup)
+                bot.send_message(chat_id, tv_text, parse_mode="HTML", reply_markup=markup)
                 return
 
-            elif action == "btn_yt_extract":
+            elif text == "📝 Yt Title Tags Extract":
                 notify_admin_log(user, "YT Title/Tags Extractor")
                 set_state(user.id, "awaiting_yt_extract")
-                bot.send_message(chat_id, t(lang, "ask_yt_extract"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🎥 <b>YouTube Data Extractor</b>\n\nযে ভিডিওর Title, Description ও Tags চান, তার লিংকটি পাঠান 👇",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_tik_title":
+            elif text == "📝 TikTok Title Extract":
                 notify_admin_log(user, "TikTok Title Extractor")
                 set_state(user.id, "awaiting_tik_title")
-                bot.send_message(chat_id, t(lang, "ask_tik_title"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🎵 <b>TikTok Title Extractor</b>\n\nটিকিটক ভিডিওর টাইটেল বা ক্যাপশন এক্সট্রাক্ট করতে লিংক পাঠান 👇",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_num_info":
+            elif text == "📞 Number to Info":
                 notify_admin_log(user, "Number to Info")
                 set_state(user.id, "awaiting_num_info")
-                bot.send_message(chat_id, t(lang, "ask_num_info"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "📞 <b>Number to Info Feature</b>\n\nযেকোনো নাম্বারের ডিটেইলস জানতে কান্ট্রি কোডসহ নাম্বারটি লিখে পাঠান।\nযেমন: <code>+88017XXXXXXXX</code> বা <code>+14158586273</code>",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_qr":
+            elif text == "🔳 Qr Maker":
                 notify_admin_log(user, "QR Maker")
                 set_state(user.id, "awaiting_qr_text")
-                bot.send_message(chat_id, t(lang, "ask_qr"), parse_mode="HTML")
+                bot.send_message(chat_id, "🔳 <b>QR Code Maker</b>\n\nQR Code বানাতে নিচে যেকোনো Text বা Link পাঠান 👇", parse_mode="HTML")
                 return
 
-            elif action == "btn_enc_dec":
+            elif text == "🔐 Encode & Decode":
                 notify_admin_log(user, "Encode & Decode Tool")
                 bot.send_message(
                     chat_id,
-                    t(lang, "enc_menu_msg"),
+                    "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (১০০% ইন-বট)</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "নিচের যেকোনো অ্যালগরিদম বেছে নিন:\n"
+                    "• Base64 Encode / Decode\n"
+                    "• URL Encode / Decode\n"
+                    "• Hex (Hexadecimal) Encode / Decode\n"
+                    "• Binary (0101) Encode / Decode\n"
+                    "• ROT13 Cipher & Text Reverse\n\n"
+                    "👇 <b>নিচের মেনু থেকে আপনার পছন্দ সিলেক্ট করুন:</b>",
                     parse_mode="HTML",
                     reply_markup=get_encode_decode_keyboard()
                 )
                 return
 
-            elif action == "btn_link_check":
+            elif text == "🛡️ Link Checker":
                 notify_admin_log(user, "Link Checker Tool")
                 set_state(user.id, "awaiting_link_check")
-                bot.send_message(chat_id, t(lang, "ask_link_check"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 & 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🔍 <b>যেকোনো URL বা লিংক এখানে পাঠান:</b>\n"
+                    "বট পরীক্ষা করবে:\n"
+                    "• লিংকটি সচল ও নিরাপদ কিনা\n"
+                    "• আসল ডেস্টিনেশন URL (Unshorten Link)\n"
+                    "• রিডাইরেক্ট চেইন (Redirect Chain)\n"
+                    "• আইপি ও সার্ভার ইনফরমেশন\n"
+                    "• ফিশিং বা ক্ষতিকারক TLD ওয়ার্নিং\n\n"
+                    "👇 <b>এখন লিংকটি লিখে বা পেস্ট করে পাঠান:</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_ip_track":
+            elif text == "🌍 IP Tracker":
                 notify_admin_log(user, "IP Tracker")
                 set_state(user.id, "awaiting_ip")
-                bot.send_message(chat_id, t(lang, "ask_ip"), parse_mode="HTML")
+                bot.send_message(chat_id, "🌍 <b>IP Tracker</b>\n\n👉 Send IP Address To Get IP Information With Location! (e.g. <code>8.8.8.8</code>)", parse_mode="HTML")
                 return
 
-            elif action == "btn_wa_open":
+            elif text == "💫 Whatsapp Opener":
                 notify_admin_log(user, "WhatsApp Opener")
                 set_state(user.id, "awaiting_wa_num")
-                bot.send_message(chat_id, t(lang, "ask_wa"), parse_mode="HTML")
+                wa_msg = (
+                    "📱 <b>Direct WhatsApp Chat Opener</b>\n\n"
+                    "🌍 All country supported (Contact save করা লাগবে না)\n\n"
+                    "<b>Examples:</b>\n"
+                    "• 017XXXXXXXX (BD)\n"
+                    "• +919876543210 (India)\n"
+                    "• 1234567890 (USA)\n\n"
+                    "📥 <b>Enter your WhatsApp number now 👇</b>"
+                )
+                bot.send_message(chat_id, wa_msg, parse_mode="HTML")
                 return
 
-            elif action == "btn_card_hub":
+            elif text == "🪪 Visa / Master Card Maker":
                 notify_admin_log(user, "Visa / Master Card Hub")
                 user_coins = get_user_coins(user.id)
                 cost = get_card_cost()
                 daily_b = get_daily_bonus_amount()
-                msg = t(lang, "card_hub_msg", cost=cost, coins=user_coins, daily_b=daily_b)
+                msg = (
+                    "💳 <b>𝐕𝐈𝐒𝐀 / 𝐌𝐀𝐒𝐓𝐄𝐑 𝐂𝐀𝐑𝐃 𝐇𝐔𝐁</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    "⚡ <b>কয়েন সিস্টেম তথ্য:</b>\n"
+                    f"• ১টি প্রিমিয়াম কার্ড নিতে <b>{cost} Coins</b> প্রয়োজন।\n"
+                    f"• আপনার বর্তমান ব্যালেন্স: <b>{user_coins} Coins 💰</b>\n"
+                    f"• প্রতিদিন ফ্রি <b>{daily_b} Coins</b> পেতে <b>🎁 Daily Bonus</b> এ ক্লিক করুন!\n\n"
+                    "👇 <b>নিচের মেনু থেকে আপনার প্রয়োজনীয় অপশন নির্বাচন করুন:</b>"
+                )
                 bot.send_message(
                     chat_id,
                     msg,
                     parse_mode="HTML",
-                    reply_markup=get_visa_menu_keyboard(user.id)
+                    reply_markup=get_visa_menu_keyboard()
                 )
                 return
 
-            elif action == "btn_cc_gen":
+            elif text == "💳 CC Generator":
                 notify_admin_log(user, "CC Generator")
                 set_state(user.id, "awaiting_cc_bin")
-                bot.send_message(chat_id, t(lang, "ask_cc_bin"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "💳 <b>Credit Card Generator (50 Cards)</b>\n\nআপনার কাঙ্ক্ষিত BIN টি দিন (৬ থেকে ৮ ডিজিট)।\n👇 এখন BIN টি লিখে পাঠান:",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_get_card":
+            elif text.startswith("💳 Get Card") or text == "💳 Get Free Card":
                 notify_admin_log(user, "Card Purchase")
                 user_coins = get_user_coins(user.id)
                 cost = get_card_cost()
                 if user_coins < cost:
-                    bot.send_message(chat_id, t(lang, "card_low_coins", cost=cost, coins=user_coins), parse_mode="HTML")
+                    msg = (
+                        "❌ <b>কয়েন অপর্যাপ্ত! | Insufficient Coins</b>\n"
+                        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"💳 ১টি প্রিমিয়াম কার্ড নিতে <b>{cost} Coins</b> প্রয়োজন।\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{user_coins} Coins</b>\n\n"
+                        "👉 ফ্রিতে কয়েন পেতে নিচের <b>🎁 Daily Bonus</b> বাটনে চাপ দিন অথবা এডমিনের সাথে যোগাযোগ করুন।"
+                    )
+                    bot.send_message(chat_id, msg, parse_mode="HTML")
                     return
 
                 card = pop_card_db()
                 if not card:
-                    bot.send_message(chat_id, t(lang, "card_out_of_stock"), parse_mode="HTML")
+                    bot.send_message(chat_id, "😢 দুঃখিত! এই মুহূর্তে কোনো কার্ড স্টকে নেই। এডমিনকে জানান।")
                 else:
                     new_bal = deduct_user_coins(user.id, cost)
                     random_zip = random.randint(10000, 99999)
                     bot.send_message(
                         chat_id,
-                        t(lang, "card_delivered", card=html.escape(card), zip_code=random_zip, cost=cost, new_bal=new_bal),
+                        f"🎁 <b>আপনার প্রিমিয়াম কার্ড:</b>\n"
+                        f"<code>{html.escape(card)}</code>\n\n"
+                        f"📌 <b>Random US ZIP:</b> <code>{random_zip}</code>\n"
+                        f"💰 <b>কাটা হয়েছে:</b> -{cost} Coins\n"
+                        f"💵 <b>অবশিষ্ট ব্যালেন্স:</b> <code>{new_bal}</code> Coins\n\n"
+                        f"<i>(কার্ড ও জিপ কোডের ওপর ক্লিক করলেই কপি হয়ে যাবে)</i>",
                         parse_mode="HTML"
                     )
                 return
 
-            elif action == "btn_daily_bonus":
+            elif text == "🎁 Daily Bonus":
                 notify_admin_log(user, "Daily Bonus Claim")
                 claimed, bonus_or_hours, mins, new_bal = claim_daily_bonus(user.id)
                 if claimed:
                     bot.send_message(
                         chat_id,
-                        t(lang, "daily_claimed", bonus=bonus_or_hours, new_bal=new_bal),
+                        f"🎉 <b>𝐃𝐀𝐈𝐋𝐘 𝐁𝐎𝐍𝐔𝐒 𝐂𝐋𝐀𝐈𝐌𝐄𝐃!</b>\n"
+                        f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"✅ আপনি আজকের ডেইলি বোনাস হিসেবে <b>+{bonus_or_hours} Coins</b> পেয়েছেন!\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{new_bal} Coins</b>\n\n"
+                        f"⏰ পরবর্তী বোনাস ২৪ ঘণ্টা পর আবার সংগ্রহ করতে পারবেন।",
                         parse_mode="HTML"
                     )
                 else:
                     bot.send_message(
                         chat_id,
-                        t(lang, "daily_cooldown", hours=bonus_or_hours, mins=mins, new_bal=new_bal),
+                        f"⏳ <b>বোনাস ইতিমধ্যে সংগ্রহ করা হয়েছে!</b>\n"
+                        f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"❌ আপনি আজকের ডেইলি বোনাস ইতিমধ্যে সংগ্রহ করেছেন।\n"
+                        f"🕒 পরবর্তী বোনাস পাওয়া যাবে: <b>{bonus_or_hours} ঘণ্টা {mins} মিনিট</b> পর।\n\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{new_bal} Coins</b>",
                         parse_mode="HTML"
                     )
                 return
 
-            elif action == "btn_my_balance":
+            elif text == "💰 My Balance":
                 user_coins = get_user_coins(user.id)
                 cost = get_card_cost()
                 daily_b = get_daily_bonus_amount()
                 bot.send_message(
                     chat_id,
-                    t(lang, "my_balance", name=html.escape(user.first_name or "User"), uid=user.id, coins=user_coins, cost=cost, daily_b=daily_b),
+                    f"💰 <b>𝐘𝐎𝐔𝐑 𝐖𝐀𝐋𝐋𝐄𝐓 𝐁𝐀𝐋𝐀𝐍𝐂𝐄</b>\n"
+                    f"✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"👤 <b>User:</b> {html.escape(user.first_name or 'User')}\n"
+                    f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
+                    f"💎 <b>কয়েন ব্যালেন্স:</b> <b>{user_coins} Coins</b>\n\n"
+                    f"💳 প্রতি কার্ডের মূল্য: <b>{cost} Coins</b>\n"
+                    f"🎁 দৈনিক ফ্রি বোনাস: <b>{daily_b} Coins</b>\n\n"
+                    f"⚡ <i>(শুধুমাত্র Visa / Master Card কিনতে কয়েন ব্যবহৃত হয়, বাকি সব টুলস ফ্রি!)</i>",
                     parse_mode="HTML"
                 )
                 return
 
-            elif action == "btn_nid":
+            elif text == "🆔 BD NID Tools":
                 notify_admin_log(user, "BD NID Tools")
-                bot.send_message(chat_id, t(lang, "nid_tools"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🆔 <b>BD NID Tools Resources:</b>\n\n👉 https://t.me/mrghostdataserver/15\n👉 https://t.me/mrghostdataserver/16",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_aadhaar":
+            elif text == "🪪 Aadhaar Tools":
                 notify_admin_log(user, "Aadhaar Tools")
-                bot.send_message(chat_id, t(lang, "aadhaar_tools"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "🪪 <b>Aadhaar Tools Resource:</b>\n\n👉 https://t.me/mrghostdataserver/14",
+                    parse_mode="HTML"
+                )
                 return
 
-            elif action == "btn_sms_bomb":
+            elif text == "⚠️ SMS BOMBER":
                 notify_admin_log(user, "SMS Bomber")
-                bot.send_message(chat_id, t(lang, "sms_bomber"), parse_mode="HTML")
+                bot.send_message(
+                    chat_id,
+                    "⚠️ <b>SMS Bomber Resource:</b>\n\n👉 https://t.me/mrghostdataserver/43",
+                    parse_mode="HTML"
+                )
                 return
 
         # ==========================================
@@ -2459,10 +2568,11 @@ if bot:
                     parse_mode="HTML"
                 )
                 try:
-                    t_lang = get_user_lang(target_uid)
                     bot.send_message(
                         target_uid,
-                        t(t_lang, "coin_notify", diff=diff_text, new_bal=new_b),
+                        f"🔔 <b>আপনার ওয়ালেট ব্যালেন্স আপডেট হয়েছে!</b>\n\n"
+                        f"এডমিন আপনার অ্যাকাউন্টে <b>{diff_text} Coins</b> আপডেট করেছেন।\n"
+                        f"💰 বর্তমান ব্যালেন্স: <b>{new_b} Coins</b>",
                         parse_mode="HTML"
                     )
                 except Exception:
@@ -2494,16 +2604,21 @@ if bot:
             clear_state(user.id)
             result = run_encode_decode(op_code, text)
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton(t(lang, "enc_btn_another"), callback_data="open_enc_menu"))
+            markup.add(types.InlineKeyboardButton("🔄 Another Operation", callback_data="open_enc_menu"))
 
-            resp_txt = t(lang, "enc_result", result=html.escape(result))
+            resp_txt = (
+                "🎯 <b>𝐄𝐍𝐂𝐎𝐃𝐄 / 𝐃𝐄𝐂𝐎𝐃𝐄 𝐑𝐄𝐒𝐔𝐋𝐓:</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<pre>{html.escape(result)}</pre>\n\n"
+                "👆 <i>ক্লিক করলেই সম্পূর্ণ ফলাফল একসাথে কপি হয়ে যাবে।</i>"
+            )
             bot.send_message(chat_id, resp_txt, parse_mode="HTML", reply_markup=markup)
             return
 
         # Link Checker State
         if state == "awaiting_link_check":
             clear_state(user.id)
-            wait_m = bot.send_message(chat_id, t(lang, "link_scanning"), parse_mode="HTML")
+            wait_m = bot.send_message(chat_id, "⏳ <b>লিংকটি স্ক্যান ও পরীক্ষা করা হচ্ছে...</b>", parse_mode="HTML")
             rep = analyze_link_safety(text)
 
             flags_txt = "\n".join([f"• {f}" for f in rep["flags"]])
@@ -2511,17 +2626,18 @@ if bot:
             if rep["redirect_chain"]:
                 redirect_txt = f"{rep['redirect_count']} Hops:\n" + "\n".join([f"→ <code>{html.escape(u)}</code>" for u in rep["redirect_chain"][:4]])
 
-            out_msg = t(
-                lang,
-                "link_report",
-                status_code=rep["status_code"],
-                safety_level=rep["safety_level"],
-                resp_ms=rep["response_time_ms"],
-                ip=rep["ip"],
-                server=rep["server"],
-                final_url=html.escape(rep["final_url"]),
-                redirect_txt=redirect_txt,
-                flags_txt=flags_txt
+            out_msg = (
+                "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 𝐀𝐍𝐀𝐋𝐘𝐒𝐈𝐒 𝐑𝐄𝐏𝐎𝐑𝐓</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🎯 <b>Status:</b> <b>{rep['status_code']}</b>\n"
+                f"🛡️ <b>Safety Level:</b> <b>{rep['safety_level']}</b>\n"
+                f"⏱️ <b>Response Time:</b> {rep['response_time_ms']} ms\n"
+                f"🌐 <b>Target IP:</b> <code>{rep['ip']}</code>\n"
+                f"🖥️ <b>Server:</b> <code>{rep['server']}</code>\n\n"
+                f"🔗 <b>Destination URL:</b>\n<code>{html.escape(rep['final_url'])}</code>\n\n"
+                f"🔄 <b>Redirect Chain:</b>\n{redirect_txt}\n\n"
+                f"⚠️ <b>Security Checks:</b>\n{flags_txt}\n"
+                "━━━━━━━━━━━━━━━━━━━━"
             )
             bot.edit_message_text(out_msg, chat_id, wait_m.message_id, parse_mode="HTML", disable_web_page_preview=True)
             return
@@ -2539,6 +2655,9 @@ if bot:
 
         elif state == "awaiting_video_url":
             clear_state(user.id)
+            if any(k in text.lower() for k in ["youtube.com", "youtu.be", "pinterest.com", "pin.it"]):
+                bot.reply_to(message, "⚠️ <b>YouTube ও Pinterest ভিডিও ডাউনলোডার রিমুভ করা হয়েছে।</b>\nদয়া করে <b>TikTok, Facebook বা Instagram</b> লিংক পাঠান।", parse_mode="HTML")
+                return
             threading.Thread(target=download_and_send_universal_video, args=(chat_id, text), daemon=True).start()
             return
 
@@ -2559,16 +2678,16 @@ if bot:
                 bot.send_photo(
                     chat_id,
                     thumb_url,
-                    caption=t(lang, "yt_thumb_caption"),
+                    caption="🎯 <b>আপনার ইউটিউব ভিডিওর থাম্বনেইল!</b>\n🔥 <i>Quality: Ultra HD (Max Resolution)</i>",
                     parse_mode="HTML"
                 )
             else:
-                bot.send_message(chat_id, t(lang, "yt_thumb_invalid"), parse_mode="HTML")
+                bot.send_message(chat_id, "❌ এটি সঠিক ইউটিউব লিংক নয়! দয়া করে সঠিক লিংক পাঠান।")
             return
 
         elif state == "awaiting_yt_extract":
             clear_state(user.id)
-            wait_m = bot.send_message(chat_id, t(lang, "yt_extracting"), parse_mode="HTML")
+            wait_m = bot.send_message(chat_id, "⏳ <b>Extracting Data from YouTube...</b>", parse_mode="HTML")
             try:
                 ydl_opts = get_ydl_options('%(id)s.%(ext)s')
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2580,7 +2699,12 @@ if bot:
                 if len(desc) > 2000:
                     desc = desc[:2000] + "... (Truncated)"
 
-                res_text = t(lang, "yt_extract_result", title=html.escape(title), desc=html.escape(desc), tags=html.escape(tags))
+                res_text = (
+                    "🎯 <b>YouTube Data Extracted Successfully!</b>\n\n"
+                    f"📌 <b>Title:</b>\n<code>{html.escape(title)}</code>\n\n"
+                    f"📝 <b>Description:</b>\n<pre>{html.escape(desc)}</pre>\n\n"
+                    f"🏷️ <b>Tags / Keywords:</b>\n<code>{html.escape(tags)}</code>"
+                )
                 bot.edit_message_text(res_text, chat_id, wait_m.message_id, parse_mode="HTML")
             except Exception:
                 try:
@@ -2589,52 +2713,62 @@ if bot:
                     desc = (r.get("description") or "No Description")[:2000]
                     tags_raw = r.get("tags")
                     tags = ", ".join(tags_raw) if isinstance(tags_raw, list) else (tags_raw or "No Tags Found")
-                    res_text = t(lang, "yt_extract_result", title=html.escape(title), desc=html.escape(desc), tags=html.escape(str(tags)))
+                    res_text = (
+                        "🎯 <b>YouTube Data Extracted Successfully!</b>\n\n"
+                        f"📌 <b>Title:</b>\n<code>{html.escape(title)}</code>\n\n"
+                        f"📝 <b>Description:</b>\n<pre>{html.escape(desc)}</pre>\n\n"
+                        f"🏷️ <b>Tags / Keywords:</b>\n<code>{html.escape(str(tags))}</code>"
+                    )
                     bot.edit_message_text(res_text, chat_id, wait_m.message_id, parse_mode="HTML")
                 except Exception:
-                    bot.edit_message_text(t(lang, "yt_extract_failed"), chat_id, wait_m.message_id, parse_mode="HTML")
+                    bot.edit_message_text("❌ এই লিংক থেকে ডাটা বের করা যায়নি! সঠিক ইউটিউব লিংক দিন।", chat_id, wait_m.message_id)
             return
 
         elif state == "awaiting_tik_title":
             clear_state(user.id)
-            wait_m = bot.send_message(chat_id, t(lang, "tik_title_loading"), parse_mode="HTML")
+            wait_m = bot.send_message(chat_id, "⏳ <b>Extracting TikTok Title...</b>", parse_mode="HTML")
             try:
                 r = requests.get("https://www.tikwm.com/api/?url=" + urllib.parse.quote(text), timeout=12).json()
                 if r.get("data"):
                     title = r["data"].get("title") or "No Title Found!"
                     bot.edit_message_text(
-                        t(lang, "tik_title_success", title=html.escape(title)),
+                        f"🎵 <b>TikTok Video Title Extracted Successfully!</b>\n\n📝 <b>Title:</b>\n<code>{html.escape(title)}</code>",
                         chat_id,
                         wait_m.message_id,
                         parse_mode="HTML"
                     )
                 else:
-                    bot.edit_message_text(t(lang, "tik_title_fail"), chat_id, wait_m.message_id, parse_mode="HTML")
+                    bot.edit_message_text("❌ Failed to fetch TikTok video data!", chat_id, wait_m.message_id)
             except Exception:
-                bot.edit_message_text(t(lang, "server_no_resp"), chat_id, wait_m.message_id, parse_mode="HTML")
+                bot.edit_message_text("❌ সার্ভার রেসপন্স করছে না, কিছুক্ষণ পর চেষ্টা করুন।", chat_id, wait_m.message_id)
             return
 
         elif state == "awaiting_num_info":
             clear_state(user.id)
-            wait_m = bot.send_message(chat_id, t(lang, "num_searching"), parse_mode="HTML")
+            wait_m = bot.send_message(chat_id, "⏳ <b>তথ্য খোঁজা হচ্ছে, দয়া করে অপেক্ষা করুন...</b>", parse_mode="HTML")
             info = resolve_phone_info(text)
 
             wa_link = f"https://wa.me/{info['clean_digits']}"
             tg_link = f"tg://resolve?phone={info['clean_digits']}"
 
-            info_txt = t(
-                lang,
-                "num_result",
-                owner=html.escape(info['owner_name']),
-                intl=html.escape(info['intl_format']),
-                nat=html.escape(info['nat_format']),
-                country=html.escape(info['country']),
-                carrier=html.escape(info['carrier']),
-                ltype=html.escape(info['type']),
-                tz=html.escape(info['timezone']),
-                valid='Yes' if info['valid'] else 'No',
-                wa_link=wa_link,
-                tg_link=tg_link
+            info_txt = (
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "📞 <b>𝐏𝐇𝐎𝐍𝐄 𝐍𝐔𝐌𝐁𝐄𝐑 𝐈𝐍𝐅𝐎𝐑𝐌𝐀𝐓𝐈𝐎𝐍</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 <b>Owner / Name   :</b> <code>{html.escape(info['owner_name'])}</code>\n"
+                f"🔹 <b>Intl. Format   :</b> <code>{html.escape(info['intl_format'])}</code>\n"
+                f"🔹 <b>National Format:</b> <code>{html.escape(info['nat_format'])}</code>\n"
+                f"🌍 <b>Country        :</b> <code>{html.escape(info['country'])}</code>\n"
+                f"📡 <b>Carrier / SIM  :</b> <code>{html.escape(info['carrier'])}</code>\n"
+                f"📱 <b>Line Type      :</b> <code>{html.escape(info['type'])}</code>\n"
+                f"⏰ <b>Timezone       :</b> <code>{html.escape(info['timezone'])}</code>\n"
+                f"✅ <b>Is Valid       :</b> <code>{'Yes' if info['valid'] else 'No'}</code>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "🕵️‍♂️ <b>𝐃𝐈𝐑𝐄𝐂𝐓 𝐌𝐄𝐒𝐒𝐀𝐆𝐈𝐍𝐆:</b>\n"
+                f"💬 <a href='{wa_link}'>Direct WhatsApp Chat</a>\n"
+                f"✈️ <a href='{tg_link}'>Direct Telegram Contact</a>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ <i>Search Completed Successfully!</i>"
             )
             bot.edit_message_text(info_txt, chat_id, wait_m.message_id, parse_mode="HTML", disable_web_page_preview=True)
             return
@@ -2645,7 +2779,7 @@ if bot:
             bot.send_photo(
                 chat_id,
                 qr_url,
-                caption=t(lang, "qr_ready", data=html.escape(text)),
+                caption=f"✅ <b>QR Code Ready!</b>\n\n📌 <b>Data:</b> <code>{html.escape(text)}</code>",
                 parse_mode="HTML"
             )
             return
@@ -2653,21 +2787,21 @@ if bot:
         elif state == "awaiting_ip":
             clear_state(user.id)
             if "." not in text:
-                bot.send_message(chat_id, t(lang, "ip_invalid"), parse_mode="HTML")
+                bot.send_message(chat_id, "❌ দয়া করে একটি সঠিক IP Address পাঠান (যেমন: 8.8.8.8)")
                 return
             try:
                 r = requests.get(f"http://ip-api.com/json/{urllib.parse.quote(text)}", timeout=10).json()
                 if r.get("status") == "fail":
                     bot.send_message(chat_id, f"❌ <b>Error:</b> {html.escape(r.get('message', 'Invalid IP'))}", parse_mode="HTML")
                     return
-                txt = t(lang, "ip_header")
+                txt = "🔻 <b>IP Information Extracted</b>\n\n"
                 for k, v in r.items():
                     txt += f"<b>{html.escape(str(k))}</b> : <code>{html.escape(str(v))}</code>\n"
                 bot.send_message(chat_id, txt, parse_mode="HTML")
                 if r.get("lat") and r.get("lon"):
                     bot.send_location(chat_id, r["lat"], r["lon"])
             except Exception:
-                bot.send_message(chat_id, t(lang, "ip_not_found"), parse_mode="HTML")
+                bot.send_message(chat_id, "❌ IP তথ্য খুঁজে পাওয়া যায়নি।")
             return
 
         elif state == "awaiting_wa_num":
@@ -2681,20 +2815,20 @@ if bot:
                 number = "1" + number
 
             if len(number) < 10 or len(number) > 15:
-                bot.send_message(chat_id, t(lang, "wa_invalid"), parse_mode="HTML")
+                bot.send_message(chat_id, "❌ Invalid number!\nSend a valid WhatsApp number with country code.")
                 return
 
             link = f"https://wa.me/{number}"
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton(t(lang, "wa_btn_open"), url=link))
-            bot.send_message(chat_id, t(lang, "wa_ready"), parse_mode="HTML", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("💬 Open WhatsApp Chat", url=link))
+            bot.send_message(chat_id, "🌍 <b>Ready for all countries!</b>\nClick below to start chat 👇", parse_mode="HTML", reply_markup=markup)
             return
 
         elif state == "awaiting_cc_bin":
             clear_state(user.id)
             bin_str = re.sub(r'[^0-9]', '', text)
             if len(bin_str) < 6:
-                bot.send_message(chat_id, t(lang, "cc_bin_invalid"), parse_mode="HTML")
+                bot.send_message(chat_id, "❌ ভুল BIN ফরম্যাট! দয়া করে অন্তত ৬ ডিজিটের সঠিক সংখ্যা পাঠান।")
                 return
             bin_str = bin_str[:8]
             cards_out = []
@@ -2720,18 +2854,19 @@ if bot:
                 cards_out.append(f"{cc_num}|{month}|{year}|{cvc}")
 
             cards_block = "\n".join(cards_out)
-            resp = t(lang, "cc_bin_result", bin_str=bin_str, cards=cards_block)
+            resp = (
+                f"💳 <b>Generated 50 Cards for BIN:</b> <code>{bin_str}</code>\n\n"
+                f"<pre>{cards_block}</pre>\n"
+                "👇 ওপরের বক্সে ক্লিক করলেই <b>সবগুলো কার্ড একসাথে কপি</b> হয়ে যাবে।"
+            )
             bot.send_message(chat_id, resp, parse_mode="HTML")
             return
 
-        # ==========================================
-        # 11. AUTO VIDEO DOWNLOADER (TIKTOK / FB / INSTA - PRIVATE CHAT ONLY)
-        # ==========================================
+        # Auto Video Downloader (TikTok / Facebook / Instagram - Private Chat Only)
         url_match = re.search(r'https?://[^\s<>"]+', text)
         if url_match:
             found_url = url_match.group(0).rstrip('.,;!?')
             domain = urllib.parse.urlparse(found_url).netloc.lower()
-
             if "tiktok.com" in domain:
                 notify_admin_log(user, "Auto TikTok Downloader")
                 threading.Thread(target=download_and_send_tiktok, args=(chat_id, found_url), daemon=True).start()
@@ -2744,14 +2879,14 @@ if bot:
                 notify_admin_log(user, "Auto Facebook Downloader")
                 threading.Thread(target=download_and_send_universal_video, args=(chat_id, found_url), daemon=True).start()
                 return
-            elif is_youtube_or_pinterest(found_url):
-                bot.reply_to(message, t(lang, "dl_unsupported_removed"), parse_mode="HTML")
+            elif any(k in domain for k in ["youtube.com", "youtu.be", "pinterest.com", "pin.it"]):
+                bot.reply_to(message, "⚠️ <b>YouTube ও Pinterest ভিডিও ডাউনলোডার রিমুভ করা হয়েছে।</b>\nদয়া করে <b>TikTok, Facebook বা Instagram</b> লিংক পাঠান।", parse_mode="HTML")
                 return
 
         # Fallback for unrecognized text in private chat
         bot.reply_to(
             message,
-            t(lang, "fallback_unrecognized"),
+            "⚠️ দয়া করে নিচের মেনু থেকে আপনার কাঙ্ক্ষিত টুলটি সিলেক্ট করুন অথবা <b>TikTok / Facebook / Instagram</b> লিংক পাঠান 👇",
             parse_mode="HTML",
             reply_markup=get_main_reply_keyboard(user.id)
         )
