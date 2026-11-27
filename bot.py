@@ -372,13 +372,16 @@ def get_user_lang(user_id):
         return "bn"
     if user_id in USER_LANG_CACHE:
         return USER_LANG_CACHE[user_id]
-    with db_mutex:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
-        conn.close()
-    lang = row[0] if (row and row[0] in SUPPORTED_LANGS) else "bn"
+    try:
+        with db_mutex:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            conn.close()
+        lang = row[0] if (row and row[0] in SUPPORTED_LANGS) else "bn"
+    except Exception:
+        lang = "bn"
     USER_LANG_CACHE[user_id] = lang
     return lang
 
@@ -788,106 +791,111 @@ def notify_admin_log(user, tool_name):
 # ==========================================
 # 4. KEYBOARD MENUS (COLORED BUTTONS)
 # ==========================================
-def get_main_reply_keyboard(user_id=None):
+def _kb_btn(text, style=None, use_style=True):
+    if use_style and style:
+        return types.KeyboardButton(text, style=style)
+    return types.KeyboardButton(text)
+
+def get_main_reply_keyboard(user_id=None, use_style=True):
     lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
 
     # Row 1: File Sharing (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_file_sharing"), style="success")
+        _kb_btn(btn(lang, "btn_file_sharing"), "success", use_style)
     )
     # Row 2: Facebook (Blue / Primary) | TikTok (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_fb_dl"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_tiktok_dl"), style="primary")
+        _kb_btn(btn(lang, "btn_fb_dl"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_tiktok_dl"), "primary", use_style)
     )
     # Row 3: Instagram (Red / Danger) | Thumbnail (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_insta_dl"), style="danger"),
-        types.KeyboardButton(btn(lang, "btn_thumb_dl"), style="success")
+        _kb_btn(btn(lang, "btn_insta_dl"), "danger", use_style),
+        _kb_btn(btn(lang, "btn_thumb_dl"), "success", use_style)
     )
     # Row 4: Image to Link (Blue / Primary) | Live TV (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_img_link"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_live_tv"), style="success")
+        _kb_btn(btn(lang, "btn_img_link"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_live_tv"), "success", use_style)
     )
     # Row 5: Number to Info (Green / Success) | QR Maker (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_num_info"), style="success"),
-        types.KeyboardButton(btn(lang, "btn_qr"), style="primary")
+        _kb_btn(btn(lang, "btn_num_info"), "success", use_style),
+        _kb_btn(btn(lang, "btn_qr"), "primary", use_style)
     )
     # Row 6: Encode & Decode (Red / Danger) | Link Checker (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_enc_dec"), style="danger"),
-        types.KeyboardButton(btn(lang, "btn_link_check"), style="success")
+        _kb_btn(btn(lang, "btn_enc_dec"), "danger", use_style),
+        _kb_btn(btn(lang, "btn_link_check"), "success", use_style)
     )
     # Row 7: Title/Tags Extract (Red / Danger) | TikTok Title Extract (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_yt_extract"), style="danger"),
-        types.KeyboardButton(btn(lang, "btn_tik_title"), style="primary")
+        _kb_btn(btn(lang, "btn_yt_extract"), "danger", use_style),
+        _kb_btn(btn(lang, "btn_tik_title"), "primary", use_style)
     )
     # Row 8: IP Tracker (Blue / Primary) | WhatsApp (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_ip_track"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_wa_open"), style="success")
+        _kb_btn(btn(lang, "btn_ip_track"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_wa_open"), "success", use_style)
     )
     # Row 9: Card Maker (Blue / Primary) | NID Tools (Red / Danger)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_card_hub"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_nid"), style="danger")
+        _kb_btn(btn(lang, "btn_card_hub"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_nid"), "danger", use_style)
     )
     # Row 10: Aadhaar Tools (Blue / Primary) | SMS Bomber (Red / Danger)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_aadhaar"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_sms_bomb"), style="danger")
+        _kb_btn(btn(lang, "btn_aadhaar"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_sms_bomb"), "danger", use_style)
     )
     # Row 11: Stats (Blue / Primary) | Help (Green / Success)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_stats"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_help"), style="success")
+        _kb_btn(btn(lang, "btn_stats"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_help"), "success", use_style)
     )
     # Row 12: Language Selector (Blue / Primary)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_lang"), style="primary")
+        _kb_btn(btn(lang, "btn_lang"), "primary", use_style)
     )
     return markup
 
-def get_language_keyboard(user_id=None):
+def get_language_keyboard(user_id=None, use_style=True):
     lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        types.KeyboardButton("🇧🇩 বাংলা", style="success"),
-        types.KeyboardButton("🇬🇧 English", style="primary")
+        _kb_btn("🇧🇩 বাংলা", "success", use_style),
+        _kb_btn("🇬🇧 English", "primary", use_style)
     )
     markup.row(
-        types.KeyboardButton("🇮🇩 Indonesia", style="danger"),
-        types.KeyboardButton(btn(lang, "btn_home"), style="primary")
+        _kb_btn("🇮🇩 Indonesia", "danger", use_style),
+        _kb_btn(btn(lang, "btn_home"), "primary", use_style)
     )
     return markup
 
-def get_file_sharing_keyboard(user_id=None):
+def get_file_sharing_keyboard(user_id=None, use_style=True):
     lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_upload_file"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_stats"), style="success")
+        _kb_btn(btn(lang, "btn_upload_file"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_stats"), "success", use_style)
     )
-    markup.row(types.KeyboardButton(btn(lang, "btn_home"), style="danger"))
+    markup.row(_kb_btn(btn(lang, "btn_home"), "danger", use_style))
     return markup
 
-def get_visa_menu_keyboard(user_id=None):
+def get_visa_menu_keyboard(user_id=None, use_style=True):
     lang = get_user_lang(user_id) if user_id else "bn"
     cost = get_card_cost()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_get_card", cost=cost), style="success"),
-        types.KeyboardButton(btn(lang, "btn_cc_gen"), style="primary")
+        _kb_btn(btn(lang, "btn_get_card", cost=cost), "success", use_style),
+        _kb_btn(btn(lang, "btn_cc_gen"), "primary", use_style)
     )
     markup.row(
-        types.KeyboardButton(btn(lang, "btn_daily_bonus"), style="primary"),
-        types.KeyboardButton(btn(lang, "btn_my_balance"), style="success")
+        _kb_btn(btn(lang, "btn_daily_bonus"), "primary", use_style),
+        _kb_btn(btn(lang, "btn_my_balance"), "success", use_style)
     )
-    markup.row(types.KeyboardButton(btn(lang, "btn_home"), style="danger"))
+    markup.row(_kb_btn(btn(lang, "btn_home"), "danger", use_style))
     return markup
 
 def get_admin_keyboard():
@@ -1736,12 +1744,21 @@ if bot:
 
         # 2. Send Stylish Welcome Message
         welcome_text = t(lang, "welcome")
-        bot.send_message(
-            message.chat.id,
-            welcome_text,
-            parse_mode="HTML",
-            reply_markup=get_main_reply_keyboard(user.id)
-        )
+        try:
+            bot.send_message(
+                message.chat.id,
+                welcome_text,
+                parse_mode="HTML",
+                reply_markup=get_main_reply_keyboard(user.id, use_style=True)
+            )
+        except Exception as send_err:
+            print(f"[!] Welcome send error (retrying without style): {send_err}", flush=True)
+            bot.send_message(
+                message.chat.id,
+                welcome_text,
+                parse_mode="HTML",
+                reply_markup=get_main_reply_keyboard(user.id, use_style=False)
+            )
 
     @bot.message_handler(commands=['lang', 'language'])
     def handle_lang_cmd(message):
@@ -2831,6 +2848,16 @@ if __name__ == "__main__":
             time.sleep(1)
         except Exception:
             pass
+
+        try:
+            bot.set_my_commands([
+                types.BotCommand("start", "Start / Main Menu"),
+                types.BotCommand("lang", "Change Language (Bangla / English / Indonesia)"),
+                types.BotCommand("help", "Help & Available Tools"),
+                types.BotCommand("ad", "Admin Panel"),
+            ])
+        except Exception as e:
+            print(f"[!] set_my_commands warning: {e}", flush=True)
 
         print("🚀 Merged All-Tools & Universal Downloader Bot is LIVE!", flush=True)
 
