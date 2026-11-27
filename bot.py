@@ -789,113 +789,145 @@ def notify_admin_log(user, tool_name):
 
 
 # ==========================================
-# 4. KEYBOARD MENUS (COLORED BUTTONS)
+# 4. BULLETPROOF MESSAGE SENDER & KEYBOARDS
 # ==========================================
-def _kb_btn(text, style=None, use_style=True):
-    if use_style and style:
-        return types.KeyboardButton(text, style=style)
+def safe_send_message(chat_id, text, parse_mode="HTML", reply_markup=None, disable_web_page_preview=None, **kwargs):
+    """
+    Bulletproof message sender:
+    1. Tries sending with requested parse_mode and reply_markup.
+    2. If it fails with HTML parse error (or any other API error), falls back to plain text with markup.
+    3. If reply_markup causes any failure, falls back without reply_markup.
+    """
+    if not bot:
+        return None
+    opts = {}
+    if disable_web_page_preview is not None:
+        opts['disable_web_page_preview'] = disable_web_page_preview
+    opts.update(kwargs)
+
+    # Attempt 1: Standard send with requested parse_mode
+    try:
+        return bot.send_message(chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup, **opts)
+    except Exception as e1:
+        print(f"[!] safe_send_message primary (HTML) failed: {e1}", flush=True)
+
+    # Attempt 2: Plain text with reply_markup (stripping tags and decoding entities)
+    plain_text = re.sub(r'<[^>]+>', '', str(text)).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+    try:
+        return bot.send_message(chat_id, plain_text, parse_mode=None, reply_markup=reply_markup, **opts)
+    except Exception as e2:
+        print(f"[!] safe_send_message plain fallback failed: {e2}", flush=True)
+
+    # Attempt 3: Plain text without reply_markup (in case reply_markup caused Telegram rejection)
+    try:
+        return bot.send_message(chat_id, plain_text, parse_mode=None, **opts)
+    except Exception as e3:
+        print(f"[!] safe_send_message stripped fallback failed: {e3}", flush=True)
+        return None
+
+def _kb_btn(text, style=None, use_style=False):
     return types.KeyboardButton(text)
 
-def get_main_reply_keyboard(user_id=None, use_style=True):
+def get_main_reply_keyboard(user_id=None, use_style=False):
     lang = get_user_lang(user_id) if user_id else "bn"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
 
-    # Row 1: File Sharing (Green / Success)
+    # Row 1: File Sharing
     markup.row(
-        _kb_btn(btn(lang, "btn_file_sharing"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_file_sharing"))
     )
-    # Row 2: Facebook (Blue / Primary) | TikTok (Blue / Primary)
+    # Row 2: Facebook | TikTok
     markup.row(
-        _kb_btn(btn(lang, "btn_fb_dl"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_tiktok_dl"), "primary", use_style)
+        types.KeyboardButton(btn(lang, "btn_fb_dl")),
+        types.KeyboardButton(btn(lang, "btn_tiktok_dl"))
     )
-    # Row 3: Instagram (Red / Danger) | Thumbnail (Green / Success)
+    # Row 3: Instagram | Thumbnail
     markup.row(
-        _kb_btn(btn(lang, "btn_insta_dl"), "danger", use_style),
-        _kb_btn(btn(lang, "btn_thumb_dl"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_insta_dl")),
+        types.KeyboardButton(btn(lang, "btn_thumb_dl"))
     )
-    # Row 4: Image to Link (Blue / Primary) | Live TV (Green / Success)
+    # Row 4: Image to Link | Live TV
     markup.row(
-        _kb_btn(btn(lang, "btn_img_link"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_live_tv"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_img_link")),
+        types.KeyboardButton(btn(lang, "btn_live_tv"))
     )
-    # Row 5: Number to Info (Green / Success) | QR Maker (Blue / Primary)
+    # Row 5: Number to Info | QR Maker
     markup.row(
-        _kb_btn(btn(lang, "btn_num_info"), "success", use_style),
-        _kb_btn(btn(lang, "btn_qr"), "primary", use_style)
+        types.KeyboardButton(btn(lang, "btn_num_info")),
+        types.KeyboardButton(btn(lang, "btn_qr"))
     )
-    # Row 6: Encode & Decode (Red / Danger) | Link Checker (Green / Success)
+    # Row 6: Encode & Decode | Link Checker
     markup.row(
-        _kb_btn(btn(lang, "btn_enc_dec"), "danger", use_style),
-        _kb_btn(btn(lang, "btn_link_check"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_enc_dec")),
+        types.KeyboardButton(btn(lang, "btn_link_check"))
     )
-    # Row 7: Title/Tags Extract (Red / Danger) | TikTok Title Extract (Blue / Primary)
+    # Row 7: Title/Tags Extract | TikTok Title Extract
     markup.row(
-        _kb_btn(btn(lang, "btn_yt_extract"), "danger", use_style),
-        _kb_btn(btn(lang, "btn_tik_title"), "primary", use_style)
+        types.KeyboardButton(btn(lang, "btn_yt_extract")),
+        types.KeyboardButton(btn(lang, "btn_tik_title"))
     )
-    # Row 8: IP Tracker (Blue / Primary) | WhatsApp (Green / Success)
+    # Row 8: IP Tracker | WhatsApp
     markup.row(
-        _kb_btn(btn(lang, "btn_ip_track"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_wa_open"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_ip_track")),
+        types.KeyboardButton(btn(lang, "btn_wa_open"))
     )
-    # Row 9: Card Maker (Blue / Primary) | NID Tools (Red / Danger)
+    # Row 9: Card Maker | NID Tools
     markup.row(
-        _kb_btn(btn(lang, "btn_card_hub"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_nid"), "danger", use_style)
+        types.KeyboardButton(btn(lang, "btn_card_hub")),
+        types.KeyboardButton(btn(lang, "btn_nid"))
     )
-    # Row 10: Aadhaar Tools (Blue / Primary) | SMS Bomber (Red / Danger)
+    # Row 10: Aadhaar Tools | SMS Bomber
     markup.row(
-        _kb_btn(btn(lang, "btn_aadhaar"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_sms_bomb"), "danger", use_style)
+        types.KeyboardButton(btn(lang, "btn_aadhaar")),
+        types.KeyboardButton(btn(lang, "btn_sms_bomb"))
     )
-    # Row 11: Stats (Blue / Primary) | Help (Green / Success)
+    # Row 11: Stats | Help
     markup.row(
-        _kb_btn(btn(lang, "btn_stats"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_help"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_stats")),
+        types.KeyboardButton(btn(lang, "btn_help"))
     )
-    # Row 12: Language Selector (Blue / Primary)
+    # Row 12: Language Selector
     markup.row(
-        _kb_btn(btn(lang, "btn_lang"), "primary", use_style)
+        types.KeyboardButton(btn(lang, "btn_lang"))
     )
     return markup
 
-def get_language_keyboard(user_id=None, use_style=True):
+def get_language_keyboard(user_id=None, use_style=False):
     lang = get_user_lang(user_id) if user_id else "bn"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        _kb_btn("🇧🇩 বাংলা", "success", use_style),
-        _kb_btn("🇬🇧 English", "primary", use_style)
+        types.KeyboardButton("🇧🇩 বাংলা"),
+        types.KeyboardButton("🇬🇧 English")
     )
     markup.row(
-        _kb_btn("🇮🇩 Indonesia", "danger", use_style),
-        _kb_btn(btn(lang, "btn_home"), "primary", use_style)
+        types.KeyboardButton("🇮🇩 Indonesia"),
+        types.KeyboardButton(btn(lang, "btn_home"))
     )
     return markup
 
-def get_file_sharing_keyboard(user_id=None, use_style=True):
+def get_file_sharing_keyboard(user_id=None, use_style=False):
     lang = get_user_lang(user_id) if user_id else "bn"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        _kb_btn(btn(lang, "btn_upload_file"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_stats"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_upload_file")),
+        types.KeyboardButton(btn(lang, "btn_stats"))
     )
-    markup.row(_kb_btn(btn(lang, "btn_home"), "danger", use_style))
+    markup.row(types.KeyboardButton(btn(lang, "btn_home")))
     return markup
 
-def get_visa_menu_keyboard(user_id=None, use_style=True):
+def get_visa_menu_keyboard(user_id=None, use_style=False):
     lang = get_user_lang(user_id) if user_id else "bn"
     cost = get_card_cost()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     markup.row(
-        _kb_btn(btn(lang, "btn_get_card", cost=cost), "success", use_style),
-        _kb_btn(btn(lang, "btn_cc_gen"), "primary", use_style)
+        types.KeyboardButton(btn(lang, "btn_get_card", cost=cost)),
+        types.KeyboardButton(btn(lang, "btn_cc_gen"))
     )
     markup.row(
-        _kb_btn(btn(lang, "btn_daily_bonus"), "primary", use_style),
-        _kb_btn(btn(lang, "btn_my_balance"), "success", use_style)
+        types.KeyboardButton(btn(lang, "btn_daily_bonus")),
+        types.KeyboardButton(btn(lang, "btn_my_balance"))
     )
-    markup.row(_kb_btn(btn(lang, "btn_home"), "danger", use_style))
+    markup.row(types.KeyboardButton(btn(lang, "btn_home")))
     return markup
 
 def get_admin_keyboard():
@@ -1742,23 +1774,14 @@ if bot:
             except Exception as e:
                 print(f"[!] Start photo send error: {e}", flush=True)
 
-        # 2. Send Stylish Welcome Message
+        # 2. Send Stylish Welcome Message with Persistent Menu Keyboard
         welcome_text = t(lang, "welcome")
-        try:
-            bot.send_message(
-                message.chat.id,
-                welcome_text,
-                parse_mode="HTML",
-                reply_markup=get_main_reply_keyboard(user.id, use_style=True)
-            )
-        except Exception as send_err:
-            print(f"[!] Welcome send error (retrying without style): {send_err}", flush=True)
-            bot.send_message(
-                message.chat.id,
-                welcome_text,
-                parse_mode="HTML",
-                reply_markup=get_main_reply_keyboard(user.id, use_style=False)
-            )
+        safe_send_message(
+            message.chat.id,
+            welcome_text,
+            parse_mode="HTML",
+            reply_markup=get_main_reply_keyboard(user.id)
+        )
 
     @bot.message_handler(commands=['lang', 'language'])
     def handle_lang_cmd(message):
@@ -1789,7 +1812,7 @@ if bot:
             types.InlineKeyboardButton(t(lang, "help_btn_channel"), url=CHANNEL_URL),
             types.InlineKeyboardButton(t(lang, "help_btn_support"), url="https://t.me/helpghotsteam")
         )
-        bot.send_message(message.chat.id, help_text, parse_mode="HTML", reply_markup=markup)
+        safe_send_message(message.chat.id, help_text, parse_mode="HTML", reply_markup=markup)
 
     @bot.message_handler(commands=['banlist'])
     def handle_banlist_cmd(message):
@@ -1981,7 +2004,7 @@ if bot:
                 file_code = data.split("|", 1)[1]
                 send_shared_file_by_code(chat_id, file_code, user_id=user_id)
             else:
-                bot.send_message(
+                safe_send_message(
                     chat_id,
                     t(lang, "verify_success_msg"),
                     parse_mode="HTML",

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import re
 """
 Trilingual localization module for Mr Ghost Bot.
 Supports:
@@ -272,12 +273,12 @@ TEXTS = {
         "id": "✅ <b>Verifikasi Berhasil!</b>\nPilih alat apa saja dari menu di bawah 👇",
     },
 
-    # --- Welcome & Help & Language ---
+    # --- Welcome &amp; Help &amp; Language ---
     "welcome": {
         "bn": (
             "👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 𝐔𝐓𝐈𝐋𝐈𝐓𝐘 𝐁𝐎𝐓!</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            "🌐 আমাদের বটটি একটি <b>100% Free Public Utility & Video Downloader Bot</b>।\n"
+            "🌐 আমাদের বটটি একটি <b>100% Free Public Utility &amp; Video Downloader Bot</b>।\n"
             "কোনো লিমিট বা চার্জ ছাড়াই সকল টুলস এবং ডাউনলোডার আনলিমিটেড ব্যবহার করুন!\n\n"
             "⚡ <b>অটো ভিডিও ডাউনলোডার:</b>\n"
             "সরাসরি চ্যাটে <b>TikTok, Facebook বা Instagram</b> লিংক পাঠালেই বট অটোমেটিক ভিডিও ও টাইটেলসহ ডাউনলোড করে দেবে!\n\n"
@@ -286,8 +287,8 @@ TEXTS = {
             "• 🌐 ৩টি ভাষা সাপোর্ট (বাংলা, English, Indonesia)\n"
             "• 🖼️ Image to Direct Link (ImgBB Hosting)\n"
             "• 📺 Live TV Streaming Hub\n"
-            "• 🔐 Encode & Decode Suite (Base64, URL, Hex, Binary)\n"
-            "• 🛡️ Real-time Link & Phishing Checker\n"
+            "• 🔐 Encode &amp; Decode Suite (Base64, URL, Hex, Binary)\n"
+            "• 🛡️ Real-time Link &amp; Phishing Checker\n"
             "• 📞 Phone Number to Information Lookup\n\n"
             "⚠️ <b>জরুরী নোটিশ:</b> বটটি সম্পূর্ণ বৈধ ও গঠনমূলক কাজে ব্যবহার করুন।\n"
             "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
@@ -295,7 +296,7 @@ TEXTS = {
         "en": (
             "👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 𝐔𝐓𝐈𝐋𝐈𝐓𝐘 𝐁𝐎𝐓!</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            "🌐 This bot is a <b>100% Free Public Utility & Video Downloader Bot</b>.\n"
+            "🌐 This bot is a <b>100% Free Public Utility &amp; Video Downloader Bot</b>.\n"
             "Use all tools and downloaders unlimited with zero limits or charges!\n\n"
             "⚡ <b>Auto Video Downloader:</b>\n"
             "Simply send any <b>TikTok, Facebook, or Instagram</b> link directly in chat and the bot will automatically download the video with its title!\n\n"
@@ -304,8 +305,8 @@ TEXTS = {
             "• 🌐 3 Languages Supported (Bangla, English, Indonesia)\n"
             "• 🖼️ Image to Direct Link (ImgBB Hosting)\n"
             "• 📺 Live TV Streaming Hub\n"
-            "• 🔐 Encode & Decode Suite (Base64, URL, Hex, Binary)\n"
-            "• 🛡️ Real-time Link & Phishing Checker\n"
+            "• 🔐 Encode &amp; Decode Suite (Base64, URL, Hex, Binary)\n"
+            "• 🛡️ Real-time Link &amp; Phishing Checker\n"
             "• 📞 Phone Number to Information Lookup\n\n"
             "⚠️ <b>Notice:</b> Please use this bot strictly for legal and constructive purposes.\n"
             "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
@@ -313,7 +314,7 @@ TEXTS = {
         "id": (
             "👋 <b>𝐒𝐄𝐋𝐀𝐌𝐀𝐓 𝐃𝐀𝐓𝐀𝐍𝐆 𝐃𝐈 𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 𝐔𝐓𝐈𝐋𝐈𝐓𝐘 𝐁𝐎𝐓!</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            "🌐 Bot ini adalah <b>Bot Utilitas & Pengunduh Video 100% Gratis</b>.\n"
+            "🌐 Bot ini adalah <b>Bot Utilitas &amp; Pengunduh Video 100% Gratis</b>.\n"
             "Gunakan semua alat dan pengunduh tanpa batas dan tanpa biaya!\n\n"
             "⚡ <b>Pengunduh Video Otomatis:</b>\n"
             "Cukup kirim tautan <b>TikTok, Facebook, atau Instagram</b> langsung di chat dan bot akan otomatis mengunduh video beserta judulnya!\n\n"
@@ -322,8 +323,8 @@ TEXTS = {
             "• 🌐 Mendukung 3 Bahasa (Bangla, English, Indonesia)\n"
             "• 🖼️ Gambar ke Tautan Langsung (Hosting ImgBB)\n"
             "• 📺 Hub Streaming TV Langsung\n"
-            "• 🔐 Suite Enkode & Dekode (Base64, URL, Hex, Biner)\n"
-            "• 🛡️ Pemeriksa Keamanan & Phishing Tautan\n"
+            "• 🔐 Suite Enkode &amp; Dekode (Base64, URL, Hex, Biner)\n"
+            "• 🛡️ Pemeriksa Keamanan &amp; Phishing Tautan\n"
             "• 📞 Pencarian Informasi Nomor Telepon\n\n"
             "⚠️ <b>Pemberitahuan:</b> Gunakan bot ini hanya untuk tujuan yang legal dan bermanfaat.\n"
             "👨‍💻 <b>Powered by Mr Ghost</b> (@mrghost_121)"
@@ -331,14 +332,14 @@ TEXTS = {
     },
     "help_text": {
         "bn": (
-            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 & 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
+            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 &amp; 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             "<b>ফ্রি টুলসসমূহ:</b>\n"
             "• 📥 অটো ভিডিও ডাউনলোডার (TikTok, Facebook, Instagram — টাইটেলসহ)\n"
             "• 🌐 ভাষা পরিবর্তন (বাংলা / English / Indonesia)\n"
             "• 🖼️ Image to Link (ImgBB Direct Hosting)\n"
             "• 📺 Live TV Streaming Player\n"
-            "• 📂 File Sharing & Cloud Link Generator\n"
+            "• 📂 File Sharing &amp; Cloud Link Generator\n"
             "• 🖼️ YouTube Thumbnail ও Title/Tags Extractor\n"
             "• 🎵 TikTok Video ও Title Extractor (No Watermark)\n"
             "• 📞 Phone Number Info ও IP Location Tracker\n"
@@ -355,21 +356,21 @@ TEXTS = {
             "আমাদের অফিসিয়াল চ্যানেলে (@mrghost_121) যুক্ত থাকতে হবে।"
         ),
         "en": (
-            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 & 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
+            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 &amp; 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             "<b>Available Free Tools:</b>\n"
             "• 📥 Auto Video Downloader (TikTok, Facebook, Instagram — with Title)\n"
             "• 🌐 Language Switcher (Bangla / English / Indonesia)\n"
             "• 🖼️ Image to Link (ImgBB Direct Hosting)\n"
             "• 📺 Live TV Streaming Player\n"
-            "• 📂 File Sharing & Cloud Link Generator\n"
-            "• 🖼️ YouTube Thumbnail & Title/Tags Extractor\n"
-            "• 🎵 TikTok Video & Title Extractor (No Watermark)\n"
-            "• 📞 Phone Number to Info & IP Location Tracker\n"
+            "• 📂 File Sharing &amp; Cloud Link Generator\n"
+            "• 🖼️ YouTube Thumbnail &amp; Title/Tags Extractor\n"
+            "• 🎵 TikTok Video &amp; Title Extractor (No Watermark)\n"
+            "• 📞 Phone Number to Info &amp; IP Location Tracker\n"
             "• 💫 Direct WhatsApp Chat Opener\n"
-            "• 🔳 QR Code Generator & CC/BIN Generator\n"
-            "• 🔐 Built-in Encode/Decode & Link Security Checker\n"
-            "• 🆔 BD NID & Aadhaar Resources\n\n"
+            "• 🔳 QR Code Generator &amp; CC/BIN Generator\n"
+            "• 🔐 Built-in Encode/Decode &amp; Link Security Checker\n"
+            "• 🆔 BD NID &amp; Aadhaar Resources\n\n"
             "<b>Bot Commands:</b>\n"
             "/start - Start or restart the bot\n"
             "/lang - Change bot language\n"
@@ -379,21 +380,21 @@ TEXTS = {
             "You must stay joined to our official channel (@mrghost_121)."
         ),
         "id": (
-            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 & 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
+            "🛡️ <b>𝐌𝐑 𝐆𝐇𝐎𝐒𝐓 — 𝐂𝐲𝐛𝐞𝐫 𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 &amp; 𝐔𝐭𝐢𝐥𝐢𝐭𝐲 𝐒𝐮𝐢𝐭𝐞</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
             "<b>Alat Gratis yang Tersedia:</b>\n"
             "• 📥 Pengunduh Video Otomatis (TikTok, Facebook, Instagram — dengan Judul)\n"
             "• 🌐 Pengubah Bahasa (Bangla / English / Indonesia)\n"
             "• 🖼️ Gambar ke Link (Hosting Langsung ImgBB)\n"
             "• 📺 Pemutar Streaming TV Langsung\n"
-            "• 📂 Berbagi File & Pembuat Tautan Cloud\n"
-            "• 🖼️ Pengunduh Thumbnail & Ekstraktor Judul/Tag YouTube\n"
-            "• 🎵 Pengunduh Video & Judul TikTok (Tanpa Watermark)\n"
-            "• 📞 Info Nomor Telepon & Pelacak Lokasi IP\n"
+            "• 📂 Berbagi File &amp; Pembuat Tautan Cloud\n"
+            "• 🖼️ Pengunduh Thumbnail &amp; Ekstraktor Judul/Tag YouTube\n"
+            "• 🎵 Pengunduh Video &amp; Judul TikTok (Tanpa Watermark)\n"
+            "• 📞 Info Nomor Telepon &amp; Pelacak Lokasi IP\n"
             "• 💫 Pembuka Chat WhatsApp Langsung\n"
-            "• 🔳 Pembuat Kode QR & Generator CC/BIN\n"
-            "• 🔐 Enkode/Dekode & Pemeriksa Keamanan Tautan\n"
-            "• 🆔 Alat BD NID & Aadhaar\n\n"
+            "• 🔳 Pembuat Kode QR &amp; Generator CC/BIN\n"
+            "• 🔐 Enkode/Dekode &amp; Pemeriksa Keamanan Tautan\n"
+            "• 🆔 Alat BD NID &amp; Aadhaar\n\n"
             "<b>Perintah Bot:</b>\n"
             "/start - Mulai atau mulai ulang bot\n"
             "/lang - Ubah bahasa bot\n"
@@ -516,14 +517,14 @@ TEXTS = {
         "en": (
             "⚠️ <b>Important Notice:</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            "For copyright & security reasons, this file will be automatically deleted from your inbox after <b>5 minutes</b>.\n\n"
+            "For copyright &amp; security reasons, this file will be automatically deleted from your inbox after <b>5 minutes</b>.\n\n"
             "📌 <i>Forward this file to your 'Saved Messages' or save it to your device now if needed.</i>\n"
             "🔄 <i>(The share link remains permanent; you can click the link again anytime to receive the file again.)</i>"
         ),
         "id": (
             "⚠️ <b>Pemberitahuan Penting:</b>\n"
             "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
-            "Demi hak cipta & keamanan, file ini akan otomatis terhapus dari kotak masuk Anda setelah <b>5 menit</b>.\n\n"
+            "Demi hak cipta &amp; keamanan, file ini akan otomatis terhapus dari kotak masuk Anda setelah <b>5 menit</b>.\n\n"
             "📌 <i>Teruskan file ini ke 'Saved Messages' atau simpan ke perangkat Anda sekarang jika perlu.</i>\n"
             "🔄 <i>(Tautan berbagi bersifat permanen; klik tautan lagi kapan saja untuk mendapatkan file kembali.)</i>"
         ),
@@ -562,7 +563,7 @@ TEXTS = {
             "• Name: <b>{name}</b>\n"
             "• ID: <code>{uid}</code>\n"
             "• Username: @{uname}\n\n"
-            "📈 <b>Activity & Status:</b>\n"
+            "📈 <b>Activity &amp; Status:</b>\n"
             "• Subscription: <b>Free Lifetime Access ⚡</b>\n"
             "• Your Uploaded Files: <b>{uploads}</b>\n"
             "• Your Coin Balance: <b>{coins} Coins 💰</b>\n"
@@ -576,7 +577,7 @@ TEXTS = {
             "• Nama: <b>{name}</b>\n"
             "• ID: <code>{uid}</code>\n"
             "• Username: @{uname}\n\n"
-            "📈 <b>Aktivitas & Status:</b>\n"
+            "📈 <b>Aktivitas &amp; Status:</b>\n"
             "• Langganan: <b>Akses Gratis Seumur Hidup ⚡</b>\n"
             "• File Diunggah: <b>{uploads}</b>\n"
             "• Saldo Koin Anda: <b>{coins} Koin 💰</b>\n"
@@ -602,9 +603,9 @@ TEXTS = {
 
     # --- Video Downloaders (TikTok, FB, Insta) ---
     "ask_fb_url": {
-        "bn": "📹 <b>Facebook Video & Reels Downloader</b>\n\nআপনার ফেসবুক ভিডিও বা রিলস (Reels) লিংকটি পাঠান 👇",
-        "en": "📹 <b>Facebook Video & Reels Downloader</b>\n\nSend your Facebook video or Reels link below 👇",
-        "id": "📹 <b>Pengunduh Video & Reels Facebook</b>\n\nKirim tautan video atau Reels Facebook Anda di bawah 👇",
+        "bn": "📹 <b>Facebook Video &amp; Reels Downloader</b>\n\nআপনার ফেসবুক ভিডিও বা রিলস (Reels) লিংকটি পাঠান 👇",
+        "en": "📹 <b>Facebook Video &amp; Reels Downloader</b>\n\nSend your Facebook video or Reels link below 👇",
+        "id": "📹 <b>Pengunduh Video &amp; Reels Facebook</b>\n\nKirim tautan video atau Reels Facebook Anda di bawah 👇",
     },
     "ask_tiktok_url": {
         "bn": "🎵 <b>TikTok Video Downloader (No Watermark)</b>\n\nসরাসরি চ্যাটে আপনার কাঙ্ক্ষিত TikTok ভিডিওর লিংক পাঠান 👇",
@@ -612,9 +613,9 @@ TEXTS = {
         "id": "🎵 <b>Pengunduh Video TikTok (Tanpa Watermark)</b>\n\nKirim tautan video TikTok langsung di chat 👇",
     },
     "ask_insta_url": {
-        "bn": "📸 <b>Instagram Video & Reels Downloader</b>\n\nআপনার ইনস্টাগ্রাম রিলস, ভিডিও বা পোস্টের লিংক পাঠান 👇",
-        "en": "📸 <b>Instagram Video & Reels Downloader</b>\n\nSend your Instagram Reels, video, or post link below 👇",
-        "id": "📸 <b>Pengunduh Video & Reels Instagram</b>\n\nKirim tautan Reels, video, atau postingan Instagram di bawah 👇",
+        "bn": "📸 <b>Instagram Video &amp; Reels Downloader</b>\n\nআপনার ইনস্টাগ্রাম রিলস, ভিডিও বা পোস্টের লিংক পাঠান 👇",
+        "en": "📸 <b>Instagram Video &amp; Reels Downloader</b>\n\nSend your Instagram Reels, video, or post link below 👇",
+        "id": "📸 <b>Pengunduh Video &amp; Reels Instagram</b>\n\nKirim tautan Reels, video, atau postingan Instagram di bawah 👇",
     },
     "dl_processing_tiktok": {
         "bn": "⏳ <b>TikTok ভিডিও সংগ্রহ ও প্রসেস করা হচ্ছে...</b>",
@@ -716,11 +717,11 @@ TEXTS = {
     },
     "dl_unsupported_removed": {
         "bn": "⚠️ <b>YouTube ও Pinterest ভিডিও ডাউনলোডার রিমুভ করা হয়েছে।</b>\nদয়া করে শুধুমাত্র <b>TikTok, Facebook বা Instagram</b> লিংক পাঠান!",
-        "en": "⚠️ <b>YouTube & Pinterest video downloaders have been removed.</b>\nPlease send only <b>TikTok, Facebook, or Instagram</b> links!",
-        "id": "⚠️ <b>Pengunduh video YouTube & Pinterest telah dihapus.</b>\nSilakan kirim hanya tautan <b>TikTok, Facebook, atau Instagram</b>!",
+        "en": "⚠️ <b>YouTube &amp; Pinterest video downloaders have been removed.</b>\nPlease send only <b>TikTok, Facebook, or Instagram</b> links!",
+        "id": "⚠️ <b>Pengunduh video YouTube &amp; Pinterest telah dihapus.</b>\nSilakan kirim hanya tautan <b>TikTok, Facebook, atau Instagram</b>!",
     },
 
-    # --- Thumbnail Downloader & YT/TikTok Extractors ---
+    # --- Thumbnail Downloader &amp; YT/TikTok Extractors ---
     "ask_yt_thumb": {
         "bn": "🖼️ <b>YouTube Thumbnail Downloader</b>\n\nদয়া করে আপনার কাঙ্ক্ষিত ইউটিউব ভিডিওর লিংকটি এখানে পাঠান:\n<i>উদাহরণ: https://youtu.be/xxxxxx</i>",
         "en": "🖼️ <b>YouTube Thumbnail Downloader</b>\n\nPlease send the YouTube video link below:\n<i>Example: https://youtu.be/xxxxxx</i>",
@@ -738,8 +739,8 @@ TEXTS = {
     },
     "ask_yt_extract": {
         "bn": "🎥 <b>YouTube Data Extractor</b>\n\nযে ভিডিওর Title, Description ও Tags চান, তার লিংকটি পাঠান 👇",
-        "en": "🎥 <b>YouTube Data Extractor</b>\n\nSend the video link to extract its Title, Description & Tags 👇",
-        "id": "🎥 <b>Ekstraktor Data YouTube</b>\n\nKirim tautan video untuk mengambil Judul, Deskripsi & Tag 👇",
+        "en": "🎥 <b>YouTube Data Extractor</b>\n\nSend the video link to extract its Title, Description &amp; Tags 👇",
+        "id": "🎥 <b>Ekstraktor Data YouTube</b>\n\nKirim tautan video untuk mengambil Judul, Deskripsi &amp; Tag 👇",
     },
     "yt_extracting": {
         "bn": "⏳ <b>ইউটিউব থেকে ডাটা সংগ্রহ করা হচ্ছে...</b>",
@@ -1004,46 +1005,46 @@ TEXTS = {
         "id": "✅ <b>Kode QR Siap!</b>\n\n📌 <b>Data:</b> <code>{data}</code>",
     },
 
-    # --- Encode & Decode ---
+    # --- Encode &amp; Decode ---
     "enc_menu_msg": {
         "bn": (
-            "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (১০০% ইন-বট)</b>\n"
+            "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 &amp; 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (১০০% ইন-বট)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "নিচের যেকোনো অ্যালগরিদম বেছে নিন:\n"
             "• Base64 Encode / Decode\n"
             "• URL Encode / Decode\n"
             "• Hex (Hexadecimal) Encode / Decode\n"
             "• Binary (0101) Encode / Decode\n"
-            "• ROT13 Cipher & Text Reverse\n\n"
+            "• ROT13 Cipher &amp; Text Reverse\n\n"
             "👇 <b>নিচের মেনু থেকে আপনার পছন্দ সিলেক্ট করুন:</b>"
         ),
         "en": (
-            "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (100% In-Bot)</b>\n"
+            "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 &amp; 𝐃𝐄𝐂𝐎𝐃𝐄 𝐒𝐔𝐈𝐓𝐄 (100% In-Bot)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Choose any algorithm below:\n"
             "• Base64 Encode / Decode\n"
             "• URL Encode / Decode\n"
             "• Hex (Hexadecimal) Encode / Decode\n"
             "• Binary (0101) Encode / Decode\n"
-            "• ROT13 Cipher & Text Reverse\n\n"
+            "• ROT13 Cipher &amp; Text Reverse\n\n"
             "👇 <b>Select your operation from the menu below:</b>"
         ),
         "id": (
-            "🔐 <b>𝐒𝐔𝐈𝐓𝐄 𝐄𝐍𝐊𝐎𝐃𝐄 & 𝐃𝐄𝐊𝐎𝐃𝐄 (100% Di Bot)</b>\n"
+            "🔐 <b>𝐒𝐔𝐈𝐓𝐄 𝐄𝐍𝐊𝐎𝐃𝐄 &amp; 𝐃𝐄𝐊𝐎𝐃𝐄 (100% Di Bot)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Pilih algoritma di bawah:\n"
             "• Enkode / Dekode Base64\n"
             "• Enkode / Dekode URL\n"
             "• Enkode / Dekode Hex\n"
             "• Enkode / Dekode Biner (0101)\n"
-            "• Sandi ROT13 & Balik Teks\n\n"
+            "• Sandi ROT13 &amp; Balik Teks\n\n"
             "👇 <b>Pilih operasi dari menu di bawah:</b>"
         ),
     },
     "enc_menu_short": {
-        "bn": "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nনিচের অপশন থেকে সিলেক্ট করুন 👇",
-        "en": "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 & 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nSelect an option below 👇",
-        "id": "🔐 <b>𝐌𝐄𝐍𝐔 𝐄𝐍𝐊𝐎𝐃𝐄 & 𝐃𝐄𝐊𝐎𝐃𝐄</b>\nPilih opsi di bawah 👇",
+        "bn": "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 &amp; 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nনিচের অপশন থেকে সিলেক্ট করুন 👇",
+        "en": "🔐 <b>𝐄𝐍𝐂𝐎𝐃𝐄 &amp; 𝐃𝐄𝐂𝐎𝐃𝐄 𝐌𝐄𝐍𝐔</b>\nSelect an option below 👇",
+        "id": "🔐 <b>𝐌𝐄𝐍𝐔 𝐄𝐍𝐊𝐎𝐃𝐄 &amp; 𝐃𝐄𝐊𝐎𝐃𝐄</b>\nPilih opsi di bawah 👇",
     },
     "enc_selected": {
         "bn": "📝 <b>সিলেক্টেড: {title}</b>\n\nযে টেক্সটটিকে কনভার্ট করতে চান তা নিচে লিখে পাঠান 👇",
@@ -1079,7 +1080,7 @@ TEXTS = {
     # --- Link Checker ---
     "ask_link_check": {
         "bn": (
-            "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 & 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
+            "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 &amp; 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔍 <b>যেকোনো URL বা লিংক এখানে পাঠান:</b>\n"
             "বট পরীক্ষা করবে:\n"
@@ -1092,27 +1093,27 @@ TEXTS = {
             "━━━━━━━━━━━━━━━━━━━━"
         ),
         "en": (
-            "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 & 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
+            "🛡️ <b>𝐋𝐈𝐍𝐊 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 &amp; 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐂𝐇𝐄𝐂𝐊𝐄𝐑</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔍 <b>Send any URL or link here:</b>\n"
             "The bot will inspect:\n"
-            "• Whether the link is live & safe\n"
+            "• Whether the link is live &amp; safe\n"
             "• Final Destination URL (Unshorten Link)\n"
             "• Full Redirect Chain\n"
-            "• Server IP & Headers\n"
+            "• Server IP &amp; Headers\n"
             "• Phishing or suspicious TLD warnings\n\n"
             "👇 <b>Paste or send the link now:</b>\n"
             "━━━━━━━━━━━━━━━━━━━━"
         ),
         "id": (
-            "🛡️ <b>𝐏𝐄𝐌𝐄𝐑𝐈𝐊𝐒𝐀 𝐊𝐄𝐀𝐌𝐀𝐍𝐀𝐍 & 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐓𝐀𝐔𝐓𝐀𝐍</b>\n"
+            "🛡️ <b>𝐏𝐄𝐌𝐄𝐑𝐈𝐊𝐒𝐀 𝐊𝐄𝐀𝐌𝐀𝐍𝐀𝐍 &amp; 𝐑𝐄𝐃𝐈𝐑𝐄𝐂𝐓 𝐓𝐀𝐔𝐓𝐀𝐍</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔍 <b>Kirim URL atau tautan apa saja di sini:</b>\n"
             "Bot akan memeriksa:\n"
-            "• Apakah tautan aktif & aman\n"
+            "• Apakah tautan aktif &amp; aman\n"
             "• URL Tujuan Akhir (Unshorten Link)\n"
             "• Rantai Pengalihan (Redirect Chain)\n"
-            "• Informasi IP & Server\n"
+            "• Informasi IP &amp; Server\n"
             "• Peringatan phishing atau TLD mencurigakan\n\n"
             "👇 <b>Tempel atau kirim tautan sekarang:</b>\n"
             "━━━━━━━━━━━━━━━━━━━━"
@@ -1423,7 +1424,7 @@ TEXTS = {
         ),
     },
 
-    # --- Misc Resource Links & Fallback ---
+    # --- Misc Resource Links &amp; Fallback ---
     "nid_tools": {
         "bn": "🆔 <b>BD NID টুলস রিসোর্স:</b>\n\n👉 https://t.me/mrghostdataserver/15\n👉 https://t.me/mrghostdataserver/16",
         "en": "🆔 <b>BD NID Tools Resources:</b>\n\n👉 https://t.me/mrghostdataserver/15\n👉 https://t.me/mrghostdataserver/16",
@@ -1458,4 +1459,5 @@ def t(lang: str, key: str, **kwargs) -> str:
     if not entry:
         return key
     val = entry.get(lang) or entry.get("en") or entry.get("bn") or ""
-    return val.format(**kwargs) if kwargs else val
+    res = val.format(**kwargs) if kwargs else val
+    return re.sub(r'&amp;(?!amp;|lt;|gt;|quot;)', '&amp;', res)
