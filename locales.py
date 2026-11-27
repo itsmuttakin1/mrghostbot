@@ -284,7 +284,6 @@ TEXTS = {
             "সরাসরি চ্যাটে <b>TikTok, Facebook বা Instagram</b> লিংক পাঠালেই বট অটোমেটিক ভিডিও ও টাইটেলসহ ডাউনলোড করে দেবে!\n\n"
             "✨ <b>জনপ্রিয় ফিচারসমূহ:</b>\n"
             "• 🎬 Auto Video Downloader (TikTok, Facebook, Instagram)\n"
-            "• 🌐 ৩টি ভাষা সাপোর্ট (বাংলা, English, Indonesia)\n"
             "• 🖼️ Image to Direct Link (ImgBB Hosting)\n"
             "• 📺 Live TV Streaming Hub\n"
             "• 🔐 Encode &amp; Decode Suite (Base64, URL, Hex, Binary)\n"

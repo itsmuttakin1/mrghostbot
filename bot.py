@@ -25,7 +25,6 @@ from phonenumbers import geocoder, carrier, timezone
 from dotenv import load_dotenv
 from locales import (
     SUPPORTED_LANGS,
-    LANG_CHOICE_BUTTONS,
     btn,
     resolve_button_action,
     t,
@@ -365,37 +364,11 @@ def init_db():
         conn.commit()
         conn.close()
 
-USER_LANG_CACHE = {}
-
 def get_user_lang(user_id):
-    if not user_id:
-        return "bn"
-    if user_id in USER_LANG_CACHE:
-        return USER_LANG_CACHE[user_id]
-    try:
-        with db_mutex:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-            row = cursor.fetchone()
-            conn.close()
-        lang = row[0] if (row and row[0] in SUPPORTED_LANGS) else "bn"
-    except Exception:
-        lang = "bn"
-    USER_LANG_CACHE[user_id] = lang
-    return lang
+    return "bn"
 
 def set_user_lang(user_id, lang):
-    if lang not in SUPPORTED_LANGS:
-        lang = "bn"
-    USER_LANG_CACHE[user_id] = lang
-    with db_mutex:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, language) VALUES (?, 'N/A', 'User', ?)", (user_id, lang))
-        cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
-        conn.commit()
-        conn.close()
+    pass
 
 def get_setting(key, default=""):
     with db_mutex:
@@ -885,23 +858,6 @@ def get_main_reply_keyboard(user_id=None, use_style=False):
     markup.row(
         types.KeyboardButton(btn(lang, "btn_stats")),
         types.KeyboardButton(btn(lang, "btn_help"))
-    )
-    # Row 12: Language Selector
-    markup.row(
-        types.KeyboardButton(btn(lang, "btn_lang"))
-    )
-    return markup
-
-def get_language_keyboard(user_id=None, use_style=False):
-    lang = get_user_lang(user_id) if user_id else "bn"
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
-    markup.row(
-        types.KeyboardButton("🇧🇩 বাংলা"),
-        types.KeyboardButton("🇬🇧 English")
-    )
-    markup.row(
-        types.KeyboardButton("🇮🇩 Indonesia"),
-        types.KeyboardButton(btn(lang, "btn_home"))
     )
     return markup
 
@@ -1783,24 +1739,6 @@ if bot:
             reply_markup=get_main_reply_keyboard(user.id)
         )
 
-    @bot.message_handler(commands=['lang', 'language'])
-    def handle_lang_cmd(message):
-        if message.chat.type != "private":
-            return
-        user = message.from_user
-        register_user(user)
-        if is_banned(user.id):
-            bot.send_message(message.chat.id, t(get_user_lang(user.id), "banned_short"), parse_mode="HTML")
-            return
-        clear_state(user.id)
-        lang = get_user_lang(user.id)
-        bot.send_message(
-            message.chat.id,
-            t(lang, "lang_prompt"),
-            parse_mode="HTML",
-            reply_markup=get_language_keyboard(user.id)
-        )
-
     @bot.message_handler(commands=['help', 'about'])
     def handle_help(message):
         if message.chat.type != "private":
@@ -2074,25 +2012,6 @@ if bot:
         register_user(user)
         lang = get_user_lang(user.id)
 
-        if text in LANG_CHOICE_BUTTONS:
-            if is_banned(user.id):
-                bot.send_message(chat_id, t(lang, "banned_short"), parse_mode="HTML")
-                return
-            new_lang = LANG_CHOICE_BUTTONS[text]
-            set_user_lang(user.id, new_lang)
-            clear_state(user.id)
-            if not check_channel_joined(user.id):
-                bot.send_message(chat_id, t(new_lang, "lang_changed"), parse_mode="HTML")
-                send_join_prompt(chat_id, "verify_home", user_id=user.id)
-                return
-            bot.send_message(
-                chat_id,
-                t(new_lang, "lang_changed"),
-                parse_mode="HTML",
-                reply_markup=get_main_reply_keyboard(user.id)
-            )
-            return
-
         if resolve_button_action(text) == "btn_home":
             clear_state(user.id)
             handle_start(message)
@@ -2274,10 +2193,6 @@ if bot:
 
             elif action == "btn_help":
                 handle_help(message)
-                return
-
-            elif action == "btn_lang":
-                bot.send_message(chat_id, t(lang, "lang_prompt"), parse_mode="HTML", reply_markup=get_language_keyboard(user.id))
                 return
 
             elif action == "btn_fb_dl":
@@ -2875,9 +2790,7 @@ if __name__ == "__main__":
         try:
             bot.set_my_commands([
                 types.BotCommand("start", "Start / Main Menu"),
-                types.BotCommand("lang", "Change Language (Bangla / English / Indonesia)"),
                 types.BotCommand("help", "Help & Available Tools"),
-                types.BotCommand("ad", "Admin Panel"),
             ])
         except Exception as e:
             print(f"[!] set_my_commands warning: {e}", flush=True)
