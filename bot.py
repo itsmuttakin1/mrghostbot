@@ -38,6 +38,9 @@ REQUIRED_CHANNEL = "@mrghost_121"
 CHANNEL_URL = "https://t.me/mrghost_121"
 REQUIRED_CHANNEL_2_URL = "https://t.me/+RlwOoen4k05kMDg9"
 IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "").strip()
+CUSTOM_SMS_API_URL = os.getenv("CUSTOM_SMS_API_URL", "https://smsmrghost.up.railway.app/api").strip()
+CUSTOM_SMS_API_KEY = os.getenv("CUSTOM_SMS_API_KEY", "csms_423f989e1fc57e308dfd9963c7aadbca4eedede0").strip()
+CUSTOM_SMS_COST = max(1, int(os.getenv("CUSTOM_SMS_COST", "1") or "1"))
 
 START_PHOTO_PATH = "start_photo.jpg"
 
@@ -346,7 +349,7 @@ def init_db():
         """)
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_mode', '0')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('start_photo_protection', '1')")
-        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_bonus_amount', '5')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_bonus_amount', '1')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('card_cost', '5')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('required_channel_2_id', '')")
         conn.commit()
@@ -414,11 +417,11 @@ def set_user_coins(user_id, amount):
         conn.close()
 
 def get_daily_bonus_amount():
-    val = get_setting("daily_bonus_amount", "5")
+    val = get_setting("daily_bonus_amount", "1")
     try:
         return int(val)
     except Exception:
-        return 5
+        return 1
 
 def set_daily_bonus_amount(amount: int):
     set_setting("daily_bonus_amount", str(max(1, amount)))
@@ -803,9 +806,18 @@ def get_main_reply_keyboard(user_id=None):
         types.KeyboardButton("🪪 Aadhaar Tools", style="primary"),
         types.KeyboardButton("⚠️ SMS BOMBER", style="danger")
     )
-    # Row 12: Stats (Blue / Primary) | Help (Green / Success)
+    # Row 12: Custom SMS (Blue / Primary) | Daily Bonus (Green / Success)
     markup.row(
-        types.KeyboardButton("📊 Stats", style="primary"),
+        types.KeyboardButton("💬 Custom SMS", style="primary"),
+        types.KeyboardButton("🎁 Daily Bonus", style="success")
+    )
+    # Row 13: Profile (Blue / Primary) | Stats (Blue / Primary)
+    markup.row(
+        types.KeyboardButton("👤 Profile", style="primary"),
+        types.KeyboardButton("📊 Stats", style="primary")
+    )
+    # Row 14: Help (Green / Success)
+    markup.row(
         types.KeyboardButton("ℹ️ Help", style="success")
     )
     return markup
@@ -900,6 +912,41 @@ def get_encode_decode_keyboard():
     )
     return markup
 
+
+def get_custom_sms_endpoint():
+    base = CUSTOM_SMS_API_URL.rstrip("/")
+    if base.endswith("/api/send") or base.endswith("/api/v1/send"):
+        return base
+    if base.endswith("/api"):
+        return f"{base}/send"
+    return f"{base}/api/send"
+
+def send_custom_sms_via_api(phone_number, message_text, user):
+    endpoint = get_custom_sms_endpoint()
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "User"
+    payload = {
+        "num": phone_number,
+        "msg": message_text,
+        "telegram_id": str(user.id),
+        "telegram_name": full_name,
+        "telegram_username": user.username or "",
+    }
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-API-Key": CUSTOM_SMS_API_KEY,
+    }
+    try:
+        res = requests.post(endpoint, json=payload, headers=headers, timeout=25)
+        try:
+            data = res.json()
+        except Exception:
+            data = {"ok": False, "error": res.text[:300] or f"HTTP {res.status_code}"}
+        if res.status_code < 400 and (data.get("sms_sent") is True or data.get("ok") is True):
+            return True, data
+        err_msg = data.get("error") or data.get("details") or f"HTTP {res.status_code}"
+        return False, {"error": err_msg, "raw": data}
+    except Exception as e:
+        return False, {"error": str(e)}
 
 # ==========================================
 # 5. CORE DOWNLOADER & TOOL HELPERS
@@ -2128,7 +2175,8 @@ if bot:
             "🔐 Encode & Decode", "🛡️ Link Checker",
             "🌍 IP Tracker", "💫 Whatsapp Opener", "🪪 Visa / Master Card Maker",
             "💳 CC Generator", "💳 Get Free Card", "🎁 Daily Bonus", "💰 My Balance",
-            "🆔 BD NID Tools", "🪪 Aadhaar Tools", "⚠️ SMS BOMBER"
+            "🆔 BD NID Tools", "🪪 Aadhaar Tools", "⚠️ SMS BOMBER",
+            "💬 Custom SMS", "👤 Profile"
         }
 
         if text in menu_buttons or text.startswith("💳 Get Card"):
@@ -2480,6 +2528,60 @@ if bot:
                 )
                 return
 
+            elif text == "💬 Custom SMS":
+                notify_admin_log(user, "Custom SMS")
+                user_coins = get_user_coins(user.id)
+                daily_b = get_daily_bonus_amount()
+                if user_coins < CUSTOM_SMS_COST:
+                    bot.send_message(
+                        chat_id,
+                        "❌ <b>কয়েন অপর্যাপ্ত! | Insufficient Coins</b>\n"
+                        "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                        f"💬 ১টি Custom SMS পাঠাতে <b>{CUSTOM_SMS_COST} Coin</b> প্রয়োজন।\n"
+                        f"💰 আপনার বর্তমান ব্যালেন্স: <b>{user_coins} Coins</b>\n\n"
+                        f"🎁 প্রতিদিন ফ্রি <b>+{daily_b} Coin</b> পেতে <b>🎁 Daily Bonus</b> বাটনে ক্লিক করুন অথবা এডমিনকে আপনার UID (👤 Profile থেকে) দিন।",
+                        parse_mode="HTML"
+                    )
+                    return
+
+                set_state(user.id, "awaiting_custom_sms_number")
+                bot.send_message(
+                    chat_id,
+                    "💬 <b>𝐂𝐔𝐒𝐓𝐎𝐌 𝐒𝐌𝐒 𝐒𝐄𝐍𝐃𝐄𝐑</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"💰 আপনার ব্যালেন্স: <b>{user_coins} Coins</b> (প্রতি SMS = <b>{CUSTOM_SMS_COST} Coin</b>)\n\n"
+                    "📱 <b>ধাপ ১/২:</b> যে নম্বরে SMS পাঠাতে চান সেই মোবাইল নম্বরটি লিখে পাঠান (যেমন: <code>017XXXXXXXX</code>):\n"
+                    "<i>(বাতিল করতে 🏠 Home চাপুন)</i>",
+                    parse_mode="HTML"
+                )
+                return
+
+            elif text == "👤 Profile":
+                register_user(user)
+                _, user_up, _ = get_user_stats(user.id)
+                user_coins = get_user_coins(user.id)
+                can_bonus, b_hrs, b_mins = can_claim_daily_bonus(user.id)
+                full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "User"
+                bonus_status = (
+                    "✅ এখনই নেওয়া যাবে (🎁 Daily Bonus চাপুন)"
+                    if can_bonus
+                    else f"⏳ পরবর্তী বোনাস {b_hrs} ঘণ্টা {b_mins} মিনিট পর"
+                )
+                profile_msg = (
+                    "👤 <b>𝐔𝐒𝐄𝐑 𝐏𝐑𝐎𝐅𝐈𝐋𝐄</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"🆔 <b>UID (ক্লিক করলেই কপি হবে):</b>\n<code>{user.id}</code>\n\n"
+                    f"📛 <b>নাম:</b> {html.escape(full_name)}\n"
+                    f"🔗 <b>ইউজারনেম:</b> @{html.escape(user.username or 'N/A')}\n"
+                    f"💰 <b>কয়েন ব্যালেন্স:</b> <b>{user_coins} Coins</b>\n"
+                    f"💬 <b>Custom SMS খরচ:</b> {CUSTOM_SMS_COST} Coin / SMS\n"
+                    f"🎁 <b>ডেইলি বোনাস:</b> {bonus_status}\n"
+                    f"📂 <b>আপলোডকৃত ফাইল:</b> {user_up} টি\n\n"
+                    "<i>💡 কয়েন নিতে আপনার UID এর ওপর ট্যাপ করে কপি করে এডমিনকে দিন।</i>"
+                )
+                bot.send_message(chat_id, profile_msg, parse_mode="HTML")
+                return
+
         # ==========================================
         # 10. STATE-BASED INPUT PROCESSING
         # ==========================================
@@ -2537,10 +2639,10 @@ if bot:
 
         elif state == "admin_manage_coins" and user.id in ADMIN_IDS:
             clear_state(user.id)
-            parts = text.split()
-            if len(parts) >= 2 and (parts[0].isdigit() or (parts[0].startswith("-") and parts[0][1:].isdigit())):
-                target_uid = int(parts[0])
-                amt_str = parts[1]
+            compact_match = re.match(r'^(-?\d+)\s*([+-]?\d+)$', text.strip())
+            if compact_match:
+                target_uid = int(compact_match.group(1))
+                amt_str = compact_match.group(2)
                 diff_text = ""
                 if amt_str.startswith("+") and amt_str[1:].isdigit():
                     amt = int(amt_str[1:])
@@ -2860,6 +2962,73 @@ if bot:
                 "👇 ওপরের বক্সে ক্লিক করলেই <b>সবগুলো কার্ড একসাথে কপি</b> হয়ে যাবে।"
             )
             bot.send_message(chat_id, resp, parse_mode="HTML")
+            return
+
+        elif state == "awaiting_custom_sms_number":
+            cleaned_num = re.sub(r'[\s\-()]+', '', text)
+            if not re.match(r'^\+?\d{8,16}$', cleaned_num):
+                bot.send_message(
+                    chat_id,
+                    "❌ <b>সঠিক মোবাইল নম্বর দিন!</b>\nযেমন: <code>017XXXXXXXX</code> বা <code>+88017XXXXXXXX</code>\n<i>(বাতিল করতে 🏠 Home চাপুন)</i>",
+                    parse_mode="HTML"
+                )
+                return
+            set_state(user.id, f"awaiting_custom_sms_msg|{cleaned_num}")
+            bot.send_message(
+                chat_id,
+                f"📱 <b>নম্বর সেট হয়েছে:</b> <code>{html.escape(cleaned_num)}</code>\n\n"
+                "📝 <b>ধাপ ২/২:</b> এখন যে মেসেজটি পাঠাতে চান তা লিখে পাঠান (বাংলা বা English):\n"
+                "<i>(বাতিল করতে 🏠 Home চাপুন)</i>",
+                parse_mode="HTML"
+            )
+            return
+
+        elif state and state.startswith("awaiting_custom_sms_msg|"):
+            target_num = state.split("|", 1)[1]
+            clear_state(user.id)
+            user_coins = get_user_coins(user.id)
+            if user_coins < CUSTOM_SMS_COST:
+                bot.send_message(
+                    chat_id,
+                    f"❌ <b>কয়েন অপর্যাপ্ত!</b> SMS পাঠাতে <b>{CUSTOM_SMS_COST} Coin</b> প্রয়োজন। আপনার ব্যালেন্স: <b>{user_coins} Coins</b>।",
+                    parse_mode="HTML"
+                )
+                return
+
+            status_m = bot.send_message(
+                chat_id,
+                f"⏳ <b>{html.escape(target_num)}</b> নম্বরে SMS পাঠানো হচ্ছে...",
+                parse_mode="HTML"
+            )
+            ok, res_data = send_custom_sms_via_api(target_num, text, user)
+            if ok:
+                new_bal = deduct_user_coins(user.id, CUSTOM_SMS_COST)
+                notify_admin_log(user, f"Custom SMS -> {target_num}")
+                provider_name = html.escape(str(res_data.get("provider") or "Gateway"))
+                bot.edit_message_text(
+                    "✅ <b>𝐂𝐔𝐒𝐓𝐎𝐌 𝐒𝐌𝐒 𝐒𝐄𝐍𝐓 𝐒𝐔𝐂𝐂𝐄𝐒𝐒𝐅𝐔𝐋𝐋𝐘!</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"📱 <b>নম্বর:</b> <code>{html.escape(target_num)}</code>\n"
+                    f"💬 <b>মেসেজ:</b> {html.escape(text)}\n"
+                    f"⚡ <b>গেটওয়ে API:</b> {provider_name}\n"
+                    f"💸 <b>খরচ:</b> -{CUSTOM_SMS_COST} Coin\n"
+                    f"💰 <b>অবশিষ্ট ব্যালেন্স:</b> <b>{new_bal} Coins</b>",
+                    chat_id,
+                    status_m.message_id,
+                    parse_mode="HTML"
+                )
+            else:
+                err_txt = html.escape(str(res_data.get("error") or "Unknown API error"))
+                bot.edit_message_text(
+                    "❌ <b>SMS পাঠানো ব্যর্থ হয়েছে!</b>\n"
+                    "✦ ━━━━━━━━━━━━━━━━━━━━ ✦\n\n"
+                    f"📱 <b>নম্বর:</b> <code>{html.escape(target_num)}</code>\n"
+                    f"⚠️ <b>কারণ:</b> <code>{err_txt}</code>\n"
+                    "💰 আপনার অ্যাকাউন্ট থেকে কোনো কয়েন কাটা হয়নি।",
+                    chat_id,
+                    status_m.message_id,
+                    parse_mode="HTML"
+                )
             return
 
         # Auto Video Downloader (TikTok / Facebook / Instagram - Private Chat Only)
